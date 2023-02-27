@@ -20,7 +20,8 @@ sim_paramspace = Paramspace(sim_params[sim_par_columns], filename_params="*")
 
 sim_plot_order = {
     'hom':{
-        'ss':['2e1', '5e1', '1e2', '2e2', '3e2', '5e2', '1e3'], 'a':['0.5_2_2_2', '1_2_2_2', '2_2_2_2', '4_2_2_2']
+        'ss':['2e1', '5e1', '1e2', '2e2', '3e2', '5e2', '1e3'], 
+        'a':['0.5_2_2_2', '1_2_2_2', '2_2_2_2', '4_2_2_2']
         },
     'iid':{
         'ss':['2e1', '5e1', '1e2', '5e2', '1e3'], 'a':['0.5_2_2_2', '1_2_2_2', '2_2_2_2', '4_2_2_2'],
@@ -39,58 +40,110 @@ sim_plot_order = {
         },
     }
 
-rule ctg_HE:
-    input:
-        cty = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/cty.batch{{i}}.txt',
-        Z = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/Z.batch{{i}}.txt',
-        ctnu = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
+rule sim_celltype_expectedPInSnBETAnVnW:
     output:
-        out = f'staging/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{{i}}',
+        pi = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/PI.txt',
+        s = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/S.txt',
+        beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
+        V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
+        W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
+    script: 'bin/sim_celltype_expectedPInSnBETAnVnW.py'
+
+rule sim_generatedata_batch:
+    input:
+        beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
+        V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
+        W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
+    output:
+        G = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/G.batch{{i}}.txt',
+        Z = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/Z.batch{{i}}.txt',
+        P = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/P.batch{{i}}.txt',
+        pi = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/estPI.batch{{i}}.txt',
+        s = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/estS.batch{{i}}.txt',
+        nu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/nu.batch{{i}}.txt',
+        ctnu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
+        y = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/y.batch{{i}}.txt',
+        cty = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/cty.batch{{i}}.txt',
     params:
-        out = f'staging/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/rep/he.npy',
-        batches = lambda wildcards: og_batches[int(wildcards.i)],
+        batches = sim_batches,
+        beta = (0.5, 0.5), # beta distribution for allele frequency
+        maf = 0.05,
+        L = 500, # number of causal SNPs
+        G = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/G.txt.gz',
+        Z = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/Z.txt.gz',
+        P = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/P.txt.gz',
+        pi = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/estPI.txt.gz',
+        s = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/estS.txt.gz',
+        nu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/nu.txt.gz',
+        ctnu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/ctnu.txt.gz',
+        y = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/y.txt.gz',
+        cty = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/repX/cty.txt.gz',
+    script: 'bin/sim_generatedata_batch.py'
+
+rule sim_HE:
+    input:
+        cty = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/cty.batch{{i}}.txt',
+        Z = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/Z.batch{{i}}.txt',
+        ctnu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{{i}}',
+    params:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/rep/he.npy',
+        batches = lambda wildcards: sim_batches[int(wildcards.i)],
     resources:
         time = '10:00:00',
         mem_per_cpu = '5000',
     priority: 1
-    script: 'bin/ctg_HE.py'
+    script: 'bin/sim_HE.py'
 
-rule ctg_REML:
+rule sim_REML:
     input:
-        cty = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/cty.batch{{i}}.txt',
-        Z = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/Z.batch{{i}}.txt',
-        P = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/P.batch{{i}}.txt',
-        ctnu = f'staging/og/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
+        cty = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/cty.batch{{i}}.txt',
+        Z = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/Z.batch{{i}}.txt',
+        P = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/P.batch{{i}}.txt',
+        ctnu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
     output:
-        out = f'staging/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/reml.batch{{i}}',
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/reml.batch{{i}}',
     params:
-        out = f'staging/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/rep/reml.npy',
-        batches = lambda wildcards: og_batches[int(wildcards.i)],
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/rep/reml.npy',
+        batches = lambda wildcards: sim_batches[int(wildcards.i)],
     resources:
         time = '100:00:00',
         #mem_per_cpu = '5000',
     priority: 1
-    script: 'bin/ctg_REML.py'
+    script: 'bin/sim_REML.py'
 
-rule ctg_mergeBatches:
+rule sim_mergeBatches:
     input:
-        he = [f'staging/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{i}' for i in range(og_batch_no)],
-        reml = [f'staging/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/reml.batch{i}' for i in range(og_batch_no)],
+        he = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{i}' for i in range(sim_batch_no)],
+        reml = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/reml.batch{i}' for i in range(sim_batch_no)],
     output:
-        out = f'analysis/ctg/{{model}}/{sim_paramspace.wildcard_pattern}/out.npy',
-    script: 'bin/og_mergeBatches.py'
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.npy',
+    script: 'bin/sim_mergeBatches.py'
 
-def ctg_agg_out_subspace(wildcards):
+def sim_agg_truebeta_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
-    return expand('analysis/ctg/{{model}}/{params}/out.npy', params=subspace.instance_patterns)
+    return expand('analysis/sim/{{model}}/{params}/celltypebeta.txt', params=subspace.instance_patterns)
 
-rule ctg_HEestimates_subspace_plot:
+def sim_agg_trueV_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/V.txt', params=subspace.instance_patterns)
+
+def sim_agg_trueW_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/W.txt', params=subspace.instance_patterns)
+
+def sim_agg_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/out.npy', params=subspace.instance_patterns)
+
+rule sim_HEestimates_subspace_plot:
     input:
-        out = ctg_agg_out_subspace,
-        V = og_agg_trueV_subspace,
-        W = og_agg_trueW_subspace,
+        out = sim_agg_out_subspace,
+        V = sim_agg_trueV_subspace,
+        W = sim_agg_trueW_subspace,
     output:
-        png = 'results/ctg/{model}/HE.AGG{arg}.png',
+        png = 'results/sim/{model}/HE.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
                 sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
@@ -98,28 +151,28 @@ rule ctg_HEestimates_subspace_plot:
         mycolors = mycolors,
         pointcolor = pointcolor,
         colorpalette = colorpalette,
-    script: 'bin/ctg_HEestimates_subspace_plot.py'
+    script: 'bin/sim_HEestimates_subspace_plot.py'
 
-rule ctg_HEwald_subspace_plot:
+rule sim_HEwald_subspace_plot:
     input:
-        out = ctg_agg_out_subspace, 
+        out = sim_agg_out_subspace, 
     output:
-        png = 'results/ctg/{model}/HE.wald.AGG{arg}.png',
+        png = 'results/sim/{model}/HE.wald.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
                 sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
         sim_plot_order = sim_plot_order,
         mycolors = mycolors,
-    script: 'bin/ctg_HEwald_subspace_plot.py'
+    script: 'bin/sim_HEwald_subspace_plot.py'
 
-rule ctg_REMLestimates_subspace_plot:
+rule sim_REMLestimates_subspace_plot:
     input:
-        out = ctg_agg_out_subspace,
-        beta = og_agg_truebeta_subspace,
-        V = og_agg_trueV_subspace,
-        W = og_agg_trueW_subspace,
+        out = sim_agg_out_subspace,
+        beta = sim_agg_truebeta_subspace,
+        V = sim_agg_trueV_subspace,
+        W = sim_agg_trueW_subspace,
     output:
-        png = 'results/ctg/{model}/REML.AGG{arg}.png',
+        png = 'results/sim/{model}/REML.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
                 sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
@@ -127,39 +180,39 @@ rule ctg_REMLestimates_subspace_plot:
         colorpalette = colorpalette,
         pointcolor = pointcolor,
         mycolors = mycolors,
-    script: 'bin/ctg_REMLestimates_subspace_plot.py'
+    script: 'bin/sim_REMLestimates_subspace_plot.py'
 
-rule ctg_REMLwaldNlrt_subspace_plot:
+rule sim_REMLwaldNlrt_subspace_plot:
     input:
-        out = ctg_agg_out_subspace, 
+        out = sim_agg_out_subspace, 
     output:
-        png = 'results/ctg/{model}/REML.waldNlrt.AGG{arg}.png',
+        png = 'results/sim/{model}/REML.waldNlrt.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
                 sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
         sim_plot_order = sim_plot_order,
         mycolors = mycolors,
-    script: 'bin/ctg_REMLwaldNlrt_subspace_plot.py'
+    script: 'bin/sim_REMLwaldNlrt_subspace_plot.py'
 
-rule ctg_collect_HEnREML_subspace_plot:
+rule sim_collect_HEnREML_subspace_plot:
     input:
-        he = 'results/ctg/{model}/HE.AGG{arg}.png',
-        he_wald = 'results/ctg/{model}/HE.wald.AGG{arg}.png',
-        reml = 'results/ctg/{model}/REML.AGG{arg}.png', # reml is too time-consuming, so not included for now
-        reml_waldNlrt = 'results/ctg/{model}/REML.waldNlrt.AGG{arg}.png',
+        he = 'results/sim/{model}/HE.AGG{arg}.png',
+        he_wald = 'results/sim/{model}/HE.wald.AGG{arg}.png',
+        reml = 'results/sim/{model}/REML.AGG{arg}.png', # reml is too time-consuming, so not included for now
+        reml_waldNlrt = 'results/sim/{model}/REML.waldNlrt.AGG{arg}.png',
     output:
-        flag = touch('staging/ctg/{model}/HEnREML.AGG{arg}.flag'),
+        flag = touch('staging/sim/{model}/HEnREML.AGG{arg}.flag'),
 
-def ctg_HEnREML_AGGarg_fun(wildcards):
+def sim_HEnREML_AGGarg_fun(wildcards):
     effective_args = get_effective_args(sim_params.loc[sim_params['model']==wildcards.model])
-    return expand('staging/ctg/{{model}}/HEnREML.AGG{arg}.flag', arg=effective_args)
+    return expand('staging/sim/{{model}}/HEnREML.AGG{arg}.flag', arg=effective_args)
 
-rule ctg_AGGarg:
+rule sim_AGGarg:
     input:
-        ctg_HEnREML_AGGarg_fun,
+        sim_HEnREML_AGGarg_fun,
     output:
-        flag = touch('staging/ctg/{model}/all.flag'),
+        flag = touch('staging/sim/{model}/all.flag'),
 
-rule ctg_all:
+rule sim_all:
     input:
-        flag = expand('staging/ctg/{model}/all.flag', model=['hom','free']),
+        flag = expand('staging/sim/{model}/all.flag', model=['hom','free']),
