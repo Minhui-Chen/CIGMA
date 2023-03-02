@@ -1,93 +1,198 @@
+from typing import Optional, Tuple
 import re, os, sys
 import numpy as np, pandas as pd
-from ctmm import wald 
 
-def HE(cty, Z, X, ctvs, model):
+from ctmm import wald, ctp
+from . import log, util
+
+def cal_Vy(A: np.ndarray, B: np.ndarray, K: np.ndarray, ctnu: np.ndarray) -> np.ndarray:
     '''
-    model: hom, free, full
+    Compute covariance matrix of vectorized Cell Type-specific Pseudobulk
+
+    Parameters:
+        A:  covariance matrix of genetic effect, sigma_g2 * J_C + V
+        B:  covariance matrix of environment effect, signma_e2 * J_C + W
+        K:  kinship matrix
+        ctnu:   cell type-specific noise variance
+
+    Returns:
+        covariance matrix of vectorized Cell Type-specific Pseudobulk V(y)
     '''
-    N, C = cty.shape
-    y = cty.flatten()
-    # project out cell type main effect
+
+    N, C = ctnu.shape
+    Vy = np.kron(K, A) + np.kron(np.eye(N), B) + np.diag( vs.flatten() )
+
+    return( Vy )
+
+def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model: str
+        ) -> np.ndarray:
+    '''
+    Perform OLS in HE
+
+    Parameters:
+        Y:  N * C matrix of Cell Type-specific Pseudobulk
+        K:  kinship matrix
+        X:  design matrix for fixed effects
+        ctnu: cell type-specific noise variance
+        model:  free / full
+    Returns:
+        a tuple of 
+            #. 
+            #.
+    '''
+
+    N, C = Y.shape
+    y = Y.flatten()
+    D = np.diag( nu.flatten() )
+    # projection matrix
     proj = np.eye(N * C) - X @ np.linalg.inv(X.T @ X) @ X.T
-    y_p = proj @ y
-    # y' y'^T - M diag(\nu) M
-    Y_m = np.outer(y_p, y_p) - proj @ np.diag(ctvs.flatten()) @ proj ########## optimize
-    Y = Y_m.flatten('F')
 
-    # T
-    T = []
-    if model != 'full':
-        T.append( (proj @ np.kron( Z, np.ones((C,C)) ) @ proj).flatten('F') ) # sigma_g2
-        T.append( (proj @ np.kron( np.eye(N), np.ones((C,C)) ) @ proj).flatten('F') )
+    # vec(M @ A @ M)^T @ vec(M @ B @ M) = vec(M @ A)^T @ vec((M @ B)^T)
+    # when A, B, and M are symmetrix
+    # proj @ y @ y^T @ proj - proj @ D @ proj
+    t = np.outer( proj @ y, y ) - proj * ctnu.flatten() 
+    t = t.flatten()
 
-    if model in ['free','full']:
+    # build Q: list of coefficients
+    def L_f(C, c1, c2):
+        # fun to build L matrix
+        L = np.zeros((C,C))
+        L[c1,c2] = 1
+        return( L )
+
+    if model == 'free':
+        Q = [   proj @ np.kron(K, np.ones((C,C))), 
+                proj @ np.kron(np.eye(N), np.ones((C,C))) ]
         for c in range(C):
-            zero_m = np.zeros((C,C))
-            zero_m[c,c] = 1
-            T.append( (proj @ np.kron( Z, zero_m ) @ proj).flatten('F') ) # V diagonal
+            L = L_f(C, c, c)
+            Q.append( proj @ np.kron(K, L) )
         for c in range(C):
-            zero_m = np.zeros((C,C))
-            zero_m[c,c] = 1
-            T.append( (proj @ np.kron( np.eye(N), zero_m ) @ proj).flatten('F') ) # W diagonal
-        if model == 'full':
-            for i in range(C-1):
-                for j in range(i+1,C):
-                    zero_m = np.zeros((C,C))
-                    zero_m[i,j] = 1
-                    T.append( 2 * (proj @ np.kron( Z, zero_m ) @ proj).flatten('F') ) # V off-diagonal
-            for i in range(C-1):
-                for j in range(i+1,C):
-                    zero_m = np.zeros((C,C))
-                    zero_m[i,j] = 1
-                    T.append( 2 * (proj @ np.kron( np.eye(N), zero_m ) @ proj).flatten('F') ) # W off-diagonal
-    T = np.array(T).T
+            L = L_f(C, c, c)
+            Q.append( proj @ np.kron(np.eye(N), L) )
+    elif model == 'full':
+        Q = []
+        for c in range(C):
+            L = L_f(C, c, c)
+            Q.append( proj @ np.kron(K, L) )
+        for c in range(C):
+            L = L_f(C, c, c)
+            Q.append( proj @ np.kron(np.eye(N), L) )
+        for i in range(C-1):
+            for j in range(i+1,C):
+                L = L_f(C, i, j) + L_f(C, j, i)
+                Q.append( proj @ np.kron(K, L) )
+        for i in range(C-1):
+            for j in range(i+1,C):
+                L = L_f(C, i, j) + L_f(C, j, i)
+                Q.append( proj @ np.kron(np.eye(N), L) )
     
-    # theta: sigma_g2, sigma_e2 in Hom; sigma_g2, sigma_e2, V diag, W diag in Free;
-    # V diag, W diag, V off diag, and W off diag in Full
-    theta = np.linalg.inv(T.T @ T) @ T.T @ Y
+    QTQ = np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+    Qt = np.array([m.flatten('F') for m in Q]) @ t
+    theta = np.linalg.inv(QTQ) @ Qt
 
     return(theta)
 
-def free_HE(cty_f, Z_f, ctnu_f):
-    cty = np.loadtxt(cty_f) 
-    Z = np.loadtxt(Z_f)
-    ctvs = np.loadtxt(ctnu_f)
-    N, C = cty.shape # cell type number
-    X = np.kron(np.ones((N,1)), np.eye(C))
-    X1 = np.kron(np.ones((N-1,1)), np.eye(C))
-    n_par = 2 + 2 * C
+def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> dict:
+    N, C = Y.shape
+    X = ctp.get_X({}, N, C)
 
-    theta = HE(cty, Z, X, ctvs, 'free')
+    theta = he_ols(Y, K, X, ctnu, 'free')
     sigma_g2, sigma_e2 = theta[0], theta[1]
     V, W = np.diag(theta[2:(C+2)]), np.diag(theta[(C+2):(C*2+2)])
-    jacks = [HE(np.delete(cty,i,axis=0), np.delete(np.delete(Z,i,axis=0),i,axis=1),
-        X1, np.delete(ctvs,i,axis=0), 'free') for i in range(N)]
-    covar = (len(jacks)-1.0) * np.cov(np.array(jacks).T, bias=True)
-    sigma_g2_var = covar[0,0]
-    sigma_e2_var = covar[1,1]
-    V_var = covar[2:(C+2), 2:(C+2)]
-    W_var = covar[(C+2):(C*2+2), (C+2):(C*2+2)]
 
-    he = {'sigma_g2': sigma_g2, 'sigma_e2':sigma_e2, 'V': V, 'W': W}
-    p = {   'sigma_g2': wald.wald_test(sigma_g2, 0, sigma_g2_var, N-n_par),
-            'sigma_e2': wald.wald_test(sigma_e2, 0, sigma_e2_var, N-n_par),
-            'V': wald.mvwald_test(np.diag(V), np.zeros(C), V_var, n=N, P=n_par),
-            'W': wald.mvwald_test(np.diag(W), np.zeros(C), W_var, n=N, P=n_par),
-            'VW': wald.mvwald_test( np.append(np.diag(V),np.diag(W)), np.zeros(2*C), 
+    # GLS to get beta
+    A = np.ones((C,C)) * sigma_g2 + V
+    B = np.ones((C,C)) * sigma_e2 + W
+    Vy = cal_Vy( A, B, K, ctnu )
+    beta = util.glse( Vy, X, y )
+    # calcualte variance of fixed and random effects, and convert to dict
+    beta, fixed_vars = util.cal_variance(beta, P, {}, {}, {})[:2]
+    ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
+    ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
+
+    return( {'sigma_g2':sigma_g2, 'sigma_e2':sigma_e2, 'V':V, 'W':W, 'beta':beta, 'fixed_vars':fixed_vars, 
+            'ct_overall_g_var':ct_overall_g_var, 'ct_specific_g_var':ct_specific_g_var, 
+            'ct_overall_e_var':ct_overall_e_var, 'ct_specific_e_var':ct_specific_e_var} )
+
+def free_HE(Y_f: str, K_f str, ctnu_f: str, P_f: str) -> Tuple[dict, dict]:
+    '''
+    Fitting Free model with HE
+
+    Parameters:
+        Y_f:    file of cell type-specific pseudobulk (no header no index)
+        K_f:    file of kinship matrix 
+        ctnu_f: file of cell type-specific noise variance (no header no index)
+        P_f:    file of cell type proportions
+
+    Returns:
+        a tuple of
+            #.  dictionary of parameter estimates
+            #.  dictionary of p values 
+    '''
+
+    log.logger.info('Fitting Free model with HE')
+
+    Y = np.loadtxt(Y_f) 
+    K = np.loadtxt(K_f)
+    ctnu = np.loadtxt(ctnu_f)
+    P = np.loadtxt(P_f)
+
+    N, C = Y.shape 
+    X = ctp.get_X({}, N, C)
+    n_par = 2 + 2 * C + X.shape[1]
+
+    out = _free_he(Y, K, ctnu, P)
+    out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
+
+    # jackknife
+    jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
+    for i in range(N):
+        Y_jk, K_jk, ctnu_jk, _, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, P=P)
+        out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk )
+
+        jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
+        jacks['V'].append( np.diag(out_jk['V']) )
+        jacks['W'].append( np.diag(out_jk['W']) )
+        jacks['VW'].append( np.append( (np.diag(out_jk['V']), np.diag(out_jk['W'])) ) )
+
+    var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
+    var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
+    var_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
+    var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
+
+    p = {   'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
+            'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), W_var, n=N, P=n_par),
+            'VW': wald.mvwald_test( np.append(np.diag(out['V']),np.diag(out['W'])), np.zeros(2*C), 
                 covar[2:(2*C+2),2:(2*C+2)], n=N, P=n_par),
+            'ct_beta': util.wald_ct_beta( out['beta']['ct_beta'], var_ct_beta, n=N, P=n_par )
             }
-    return(he, p)
+    return(out, p)
 
-def full_HE(cty_f, Z_f, ctnu_f):
-    cty = np.loadtxt(cty_f) 
-    Z = np.loadtxt(Z_f)
-    ctvs = np.loadtxt(ctnu_f)
-    N, C = cty.shape # cell type number
+def full_HE(Y_f: str, K_f: str, ctnu_f: str, P_f: str) -> dict:
+    '''
+    Fitting Full model with HE
+
+    Parameters:
+        Y_f:    file of cell type-specific pseudobulk (no header no index)
+        K_f:    file of kinship matrix 
+        ctnu_f: file of cell type-specific noise variance (no header no index)
+        P_f:    file of cell type proportions
+
+    Returns:
+        a dictionary of parameter estimates
+    '''
+
+    log.logger.info('Fitting Full model with HE')
+
+    Y = np.loadtxt(Y_f) 
+    K = np.loadtxt(K_f)
+    ctnu = np.loadtxt(ctnu_f)
+
+    N, C = Y.shape 
     ntril = (C-1) * C // 2
-    X = np.kron(np.ones((N,1)), np.eye(C))
+    X = ctp.get_X({}, N, C)
 
-    theta = HE(cty, Z, X, ctvs, 'full')
+    theta = he_ols(Y, K, X, ctnu, 'full')
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
     V[np.triu_indices(C,k=1)] = theta[(C*2):(C*2 + ntril)]
     V = V + V.T - np.diag(theta[:C])
@@ -97,34 +202,3 @@ def full_HE(cty_f, Z_f, ctnu_f):
     he = {'V': V, 'W': W}
     return( he )
 
-def main():
-
-    batch = snakemake.params.batches
-    outs = [re.sub('/rep/', f'/rep{i}/', snakemake.params.out) for i in batch]
-    for cty_f, Z_f, ctnu_f, out_f in zip(
-            [line.strip() for line in open(snakemake.input.cty)],
-            [line.strip() for line in open(snakemake.input.Z)],
-            [line.strip() for line in open(snakemake.input.ctnu)], 
-            outs):
-        print(cty_f, Z_f, ctnu_f)
-        os.makedirs(os.path.dirname(out_f), exist_ok=True)
-
-        ## Free
-        free_he, free_he_wald = free_HE(cty_f, Z_f, ctnu_f)
-
-        # Full
-        full_he = full_HE(cty_f, Z_f, ctnu_f)
-
-        # save
-        np.save(out_f,
-                {'free':free_he, 'full':full_he, 
-                'wald': {'free':free_he_wald} 
-                }
-            )
-        
-    with open(snakemake.output.out, 'w') as f:
-        f.write('\n'.join(outs))  
-
-
-if __name__ == '__main__':
-    main()
