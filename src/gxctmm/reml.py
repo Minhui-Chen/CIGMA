@@ -1,41 +1,18 @@
 import numpy as np, pandas as pd
 from scipy import linalg, optimize
-import util, wald
 
-def get_X(fixed_covars, N, C):
-    X = np.kron( np.ones((N,1)), np.eye(C) )
-    for key in np.sort(list(fixed_covars.keys())):
-        m = fixed_covars[key]
-        if len( m.shape ) == 1:
-            m = m.reshape(-1,1)
-        X = np.concatenate( ( X, np.repeat(m, C, axis=0)), axis=1 )
-    return( X )
+from ctmm import ctp, wald
+from . import util, HE
 
-def SIGMA( Z, ctvs, hom_g2=0, hom_e2=0, 
-        V=None, W=None ):
-    '''
-    Variance matrix of y
-    '''
-    N, C = ctvs.shape
-    if V is None:
-        V = np.matrix(np.zeros((C,C)))
-    if W is None:
-        W = np.matrix(np.zeros((C,C)))
-    sigma_y2 = np.kron(Z, hom_g2+V)
-    sigma_y2 = sigma_y2 + np.kron( np.eye(N), hom_e2+W )
-    sigma_y2 = sigma_y2 + np.diag( ctvs.flatten() )
-
-    return sigma_y2
-
-def LL(y, Z, X, ctvs, hom_g2, hom_e2, V, W):
+def LL(y, K, X, ctnu, hom_g2, hom_e2, V, W):
     '''
     Loglikelihood function
     '''
-    N, C = ctvs.shape
-    sigma_y2 = SIGMA( Z, ctvs, hom_g2, hom_e2, V, W)
+    N, C = ctnu.shape
+    Vy = HE.cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
 
     # inverse variance
-    w, v = linalg.eigh(sigma_y2)
+    w, v = linalg.eigh(Vy)
     if ( np.amax(w)/np.amin(w) ) > 1e8 or np.amin(w) < 0:
         return(1e12)
 
@@ -51,7 +28,7 @@ def LL(y, Z, X, ctvs, hom_g2, hom_e2, V, W):
     L = 0.5 * L
     return( L )
 
-def extract( out, model, cty, Z, P, ctvs, fixed_covars ):
+def extract( out, model, cty, K, P, ctnu, fixed_covars ):
     N, C = cty.shape
     ngam = C*(C+1) // 2
 
@@ -76,53 +53,44 @@ def extract( out, model, cty, Z, P, ctvs, fixed_covars ):
 
     # beta
     y = cty.flatten()
-    X = get_X( fixed_covars, N, C )
+    X = ctp.get_X( fixed_covars, N, C )
 
-    Vy = SIGMA( Z, ctvs, hom_g2, hom_e2, V, W)
+    Vy = HE.cal_Vy( K, ctnu, hom_g2, hom_e2, V, W)
     beta = util.glse( Vy, X, y )
     beta, fixed_vars = util.fixedeffect_vars( beta, P, fixed_covars )
 
     return( hom_g2, hom_e2, V, W, beta, ct_overall_g2, ct_overall_e2, fixed_vars )
 
-def check_optim(opt, hom_g2, hom_e2, ct_overall_g2, ct_overall_e2, fixed_vars, cut=5):
-    if ( ( opt['l'] < -1e10 ) or ( not opt['success'] ) or 
-            ( hom_g2 > cut ) or ( hom_e2 > cut ) or
-            ( ct_overall_g2 > cut ) or ( ct_overall_e2 > cut ) or
-            np.any(np.array(list(fixed_vars.values())) > cut) ):
-        return True
-    else:
-        return False
-
-def reml_f(loglike_fun, par, model, cty, Z, P, ctvs, fixed_covars, method, nrep):
+def reml_f(loglike_fun, par, model, cty, K, P, ctnu, fixed_covars, method, nrep):
     N, C = cty.shape
     y = cty.flatten()
-    X = get_X( fixed_covars, N, C )
+    X = ctp.get_X( fixed_covars, N, C )
 
-    args = (y, Z, X, ctvs)
+    args = (y, K, X, ctnu)
 
     out, opt = util.optim( loglike_fun, par, args, method )
     hom_g2, hom_e2, V, W, beta, ct_overall_g2, ct_overall_e2, fixed_vars = extract( 
-            out, model, cty, Z, P, ctvs, fixed_covars )
+            out, model, cty, K, P, ctnu, fixed_covars )
 
-    if check_optim(opt, hom_g2, hom_e2, ct_overall_g2, ct_overall_e2, fixed_vars):
+    if util.check_optim(opt, hom_g2, hom_e2, ct_overall_g2, ct_overall_e2, fixed_vars):
         out, opt = util.re_optim(out, opt, loglike_fun, par, args, method, nrep)
         hom_g2, hom_e2, V, W, beta, ct_overall_g2, ct_overall_e2, fixed_vars = extract( 
-                out, model, cty, Z, P, ctvs, fixed_covars )
+                out, model, cty, K, P, ctnu, fixed_covars )
     return(opt, beta, hom_g2, hom_e2, V, W, ct_overall_g2, ct_overall_e2, fixed_vars)
 
-def hom_REML_loglike(par, y, Z, X, ctvs):
-    N, C = ctvs.shape
+def hom_REML_loglike(par, y, K, X, ctnu):
+    N, C = ctnu.shape
     hom_g2, hom_e2 = par
     V = np.zeros((C,C))
     W = np.zeros((C,C))
 
-    l = LL(y, Z, X, ctvs, hom_g2, hom_e2, V, W)
+    l = LL(y, K, X, ctnu, hom_g2, hom_e2, V, W)
     return( l )
 
-def hom_REML(cty, Z, P, ctvs, fixed_covars={}, par=None, method=None, nrep=10):
+def hom_REML(cty, K, P, ctnu, fixed_covars={}, par=None, method=None, nrep=10):
     N, C = cty.shape
     y = cty.flatten()
-    X = get_X( fixed_covars, N, C )
+    X = ctp.get_X( fixed_covars, N, C )
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
@@ -130,24 +98,24 @@ def hom_REML(cty, Z, P, ctvs, fixed_covars={}, par=None, method=None, nrep=10):
         par = [hom_g2] * 2
     
     opt, beta, hom_g2, hom_e2 = reml_f(
-            screml_hom_loglike, par, 'hom', cty, Z, P, ctvs, fixed_covars, method, nrep=10)[:4]
+            screml_hom_loglike, par, 'hom', cty, K, P, ctnu, fixed_covars, method, nrep=10)[:4]
 
     return({'hom_g2':hom_g2, 'hom_e2':hom_e2, 'beta':beta, 'opt':opt})
 
-def free_REML_loglike(par, y, Z, X, ctvs):
-    N, C = ctvs.shape
+def free_REML_loglike(par, y, K, X, ctnu):
+    N, C = ctnu.shape
     hom_g2 = par[0]
     hom_e2 = par[1]
     V = np.diag(par[2:(C+2)])
     W = np.diag(par[(C+2):(2*C+2)])
 
-    l = LL(y, Z, X, ctvs, hom_g2, hom_e2, V, W)
+    l = LL(y, K, X, ctnu, hom_g2, hom_e2, V, W)
     return( l )
 
-def free_REML(cty, Z, P, ctvs, fixed_covars={}, par=None, method=None, nrep=10, jk=True):
+def free_REML(cty, K, P, ctnu, fixed_covars={}, par=None, method=None, nrep=10, jk=True):
     N, C = cty.shape
     y = cty.flatten()
-    X = get_X( fixed_covars, N, C )
+    X = ctp.get_X( fixed_covars, N, C )
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
@@ -155,19 +123,19 @@ def free_REML(cty, Z, P, ctvs, fixed_covars={}, par=None, method=None, nrep=10, 
         par = [hom_g2] * (2 + 2*C)
 
     opt, beta, hom_g2, hom_e2, V, W = reml_f(
-            screml_free_loglike, par, 'free', cty, Z, P, ctvs, fixed_covars, method, nrep=10)[:6]
+            screml_free_loglike, par, 'free', cty, K, P, ctnu, fixed_covars, method, nrep=10)[:6]
     results = {'hom_g2':hom_g2, 'hom_e2':hom_e2, 'V':V, 'W':W, 'beta':beta, 'opt':opt}
     
     if jk:
         jacks = {'ct_beta':[], 'hom_g2':[], 'hom_e2':[], 'V':[], 'W':[]}
         for i in range(N):
-            cty_jk, ctvs_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(
-                    i, cty, ctvs, fixed_covars, {}, P)
-            Z_jk = np.delete(np.delete(Z, i, axis=0), i, axis=1)
+            cty_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(
+                    i, cty, ctnu, fixed_covars, {}, P)
+            K_jk = np.delete(np.delete(K, i, axis=0), i, axis=1)
 
             _, beta_jk, hom_g2_jk, hom_e2_jk, V_jk, W_jk = reml_f(
-                    screml_free_loglike, par, 'free', cty_jk, Z_jk, 
-                    P_jk, ctvs_jk, fixed_covars_jk, method, nrep=10)[:6]
+                    screml_free_loglike, par, 'free', cty_jk, K_jk, 
+                    P_jk, ctnu_jk, fixed_covars_jk, method, nrep=10)[:6]
 
             jacks['ct_beta'].append( beta_jk['ct_beta'] )
             jacks['hom_g2'].append( hom_g2_jk )
@@ -195,8 +163,8 @@ def free_REML(cty, Z, P, ctvs, fixed_covars={}, par=None, method=None, nrep=10, 
     return( results, p )
 
 
-def full_REML_loglike(par, y, Z, X, ctvs):
-    N, C = ctvs.shape
+def full_REML_loglike(par, y, K, X, ctnu):
+    N, C = ctnu.shape
     ngam = C*(C+1) // 2
     hom_g2 = 0
     hom_e2 = 0
@@ -207,14 +175,14 @@ def full_REML_loglike(par, y, Z, X, ctvs):
     W[np.tril_indices(C)] = par[ngam:(2*ngam)]
     W = W + W.T
 
-    l = LL(y, Z, X, ctvs, hom_g2, hom_e2, V, W)
+    l = LL(y, K, X, ctnu, hom_g2, hom_e2, V, W)
     return( l )
 
-def full_REML(cty, Z, ctvs, fixed_covars={}, par=None, method=None, nrep=10):
+def full_REML(cty, K, ctnu, fixed_covars={}, par=None, method=None, nrep=10):
     N, C = cty.shape
     ngam = C*(C+1) // 2
     y = cty.flatten()
-    X = get_X( fixed_covars, N, C )
+    X = ctp.get_X( fixed_covars, N, C )
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
@@ -223,7 +191,7 @@ def full_REML(cty, Z, ctvs, fixed_covars={}, par=None, method=None, nrep=10):
         par = list(V) + list(W)
 
     opt, beta, _, _, V, W = reml_f(
-            screml_full_loglike, par, 'full', cty, Z, P, ctvs, fixed_covars, method, nrep=10)[:6]
+            screml_full_loglike, par, 'full', cty, K, P, ctnu, fixed_covars, method, nrep=10)[:6]
     results = {'V':V, 'W':W, 'beta':beta, 'opt':opt}
 
     return( results )
