@@ -352,7 +352,7 @@ def assign_fixedeffect_vars(fixedeffect_vars_l: list, fixed_covars_d: dict) -> d
             fixedeffect_vars_d[key] = value
     return(fixedeffect_vars_d)
 
-def RandomeffectVariance_( V: np.ndarray, X: np.ndarray ) -> float:
+def _random_var( V: np.ndarray, X: np.ndarray ) -> float:
     '''
     Compute variance of random effect
 
@@ -369,14 +369,14 @@ def RandomeffectVariance( Vs: Union[list, dict], Xs: Union[list, dict] ) -> Unio
         if len( np.array( Vs ).shape ) == 1:
             Vs = [V * np.eye(X.shape[1]) for V, X in zip(Vs, Xs)]
 
-        vars = [RandomeffectVariance_(V,X) for V,X in zip(Vs, Xs)]
+        vars = [_random_var(V,X) for V,X in zip(Vs, Xs)]
     elif isinstance( Xs, dict ):
         vars = {}
         for key in Xs.keys():
             V, X = Vs[key], Xs[key]
             if isinstance(V, float):
                 V = V  * np.eye(X.shape[1])
-            vars[key] = RandomeffectVariance_(V,X)
+            vars[key] = _random_var(V,X)
     return( vars )
 
 def assign_randomeffect_vars(randomeffect_vars_l: list, r2_l: list, random_covars_d: dict) -> Tuple[dict, dict]:
@@ -393,7 +393,7 @@ def assign_randomeffect_vars(randomeffect_vars_l: list, r2_l: list, random_covar
 
     return( randomeffect_vars_d, r2_d )
 
-def ct_randomeffect_variance( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.ndarray]:
+def ct_random_var( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.ndarray]:
     '''
     Compute overall and specific variance of each cell type
     
@@ -406,7 +406,7 @@ def ct_randomeffect_variance( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.
             #. cell type-specific variance
     '''
     N, C = P.shape
-    ct_overall_var = RandomeffectVariance_(V, P)
+    ct_overall_var = _random_var(V, P)
     ct_specific_var = np.array([V[i,i] * ((P[:,i]**2).mean()) for i in range(C)])
 
     return( ct_overall_var, ct_specific_var )
