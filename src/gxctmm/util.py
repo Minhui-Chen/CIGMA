@@ -8,7 +8,7 @@ from rpy2.robjects.conversion import localconverter
 from scipy import stats, linalg, optimize
 from numpy.random import default_rng
 
-from . import wald
+from ctmm import wald
 
 def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[int] = None) -> tuple:
     '''
@@ -75,14 +75,17 @@ def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, d
                 'message':out['message'], 'l':out['fun'] * (-1)}
     return( out, opt )
 
-def check_optim(opt: dict, hom2: float, ct_overall_var: float, fixed_vars: dict, random_vars: dict, cut: float=5) -> bool:
+def check_optim(opt: dict, hom_g2: float, hom_e2: float, ct_overall_g_var: float, ct_overall_e_var: float, 
+        fixed_vars: dict, random_vars: dict={}, cut: float=5) -> bool:
     '''
     Check whether optimization converged successfully
 
     Parameters:
         opt:    dict of optimization results, e.g. log-likelihood
-        hom2:   shared variance of cell type random effect
-        ct_ovaerall_var:    overall variance explained by cell type-specific effect
+        hom_g2: variance of genetic effect shared across cell types
+        hom_e2: variance of env effect shared across cell types
+        ct_overall_g_var:  overall variance explained by cell type-specific genetic effect
+        ct_overall_e_var:  overall variance explained by cell type-specific env effect
         fixed_var:  dict of variances explained by each fixed effect feature, including cell type-specific fixed effect
         random_var: dict of variances explained by each random effect feature, doesn't include cell type-shared or -specific effect
         cut:    threshold for large variance
@@ -90,7 +93,8 @@ def check_optim(opt: dict, hom2: float, ct_overall_var: float, fixed_vars: dict,
         True:   optim failed to converge
         False:  optim successfully to converge
     '''
-    if ( (opt['l'] < -1e10) or (not opt['success']) or (hom2 > cut) or (ct_overall_var > cut) or
+    if ( (opt['l'] < -1e10) or (not opt['success']) or (hom_g2 > cut) or (hom_e2 > cut) or 
+            (ct_overall_g_var > cut) or (ct_overall_e_var > cut) or
             np.any(np.array(list(fixed_vars.values())) > cut) or
             np.any(np.array(list(random_vars.values())) > cut) ):
         return True
@@ -510,13 +514,25 @@ def order_by_randomcovariate(R: np.ndarray, Xs: list=[], Ys: dict={}
 
     return(index, R, new_Xs, new_Ys)
 
-def jk_rmInd(i: int, Y: np.ndarray, vs: np.ndarray, fixed_covars: dict={}, random_covars: dict={}, P: Optional[np.ndarray]=None
-        ) -> tuple:
+def jk_rmInd(i: int, Y: np.ndarray, K: np.adarray, ctnu: np.ndarray, fixed_covars: dict={}, 
+        random_covars: dict={}, P: Optional[np.ndarray]=None) -> tuple:
     '''
     Remove one individual from the matrices for jackknife
+
+    Parameters:
+        i:  index of individual to remove
+        Y:  Cell Type-specific Pseudobulk
+        K:  Kinship matrix
+        ctnu:   cell type-specific noise variance
+        fixed_covars:   design matrix for Extra fixed effect
+        random_covars:  design matrix for Extra random effect
+        P:  cell type proportions
+    Returns:
+        a tuple of matrices after removing ith individual
     '''
     Y_ = np.delete(Y, i, axis=0)
-    vs_ = np.delete(vs, i, axis=0)
+    K_ = np.delete(np.delete(K,i,axis=0),i,axis=1)
+    ctnu_ = np.delete(ctnu, i, axis=0)
     fixed_covars_ = {}
     for key in fixed_covars.keys():
         fixed_covars_[key] = np.delete(fixed_covars[key], i, axis=0)
@@ -524,10 +540,10 @@ def jk_rmInd(i: int, Y: np.ndarray, vs: np.ndarray, fixed_covars: dict={}, rando
     for key in random_covars.keys():
         random_covars_[key] = np.delete(random_covars[key], i, axis=0)
     if P is None:
-        return(Y_, vs_, fixed_covars_, random_covars_)
+        return(Y_, K_, ctnu_, fixed_covars_, random_covars_)
     else:
         P_ = np.delete(P, i, axis=0)
-        return(Y_, vs_, fixed_covars_, random_covars_, P_)
+        return(Y_, K_, ctnu_, fixed_covars_, random_covars_, P_)
 
 def lrt(l: float, l0: float, k: int) -> float:
     '''
