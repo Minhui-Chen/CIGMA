@@ -422,6 +422,13 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[
         fixed_covars: design matrices for additional fixed effects
         r2: variances of additional random effects
         random_covars:  design matrices for additional random effects
+
+    Returns:
+        a tuple of 
+            #.  fixed effects
+            #.  OP variance explained by fixed effects
+            #.  random effect variances
+            #.  OP variance explained by random effects
     '''
     # calcualte variance of fixed and random effects, and convert to dict
     beta, fixed_vars = fixedeffect_vars( beta, P, fixed_covars ) # fixed effects are always ordered
