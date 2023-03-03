@@ -271,8 +271,7 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray, fixe
 
     res = _reml( hom_REML_loglike, par, 'hom', Y, K, P, ctnu, fixed_covars, method, nrep=nrep )
 
-    return({'hom_g2':res['hom_g2'], 'hom_e2':res['hom_e2'], 'beta':res['beta'], 
-        'opt':res['opt']})
+    return( res )
 
 def free_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray) -> float:
     '''
