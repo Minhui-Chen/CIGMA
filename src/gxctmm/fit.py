@@ -223,7 +223,7 @@ def _reml(loglike_fun: callable, par: list, model: str, Y: np.ndarray, K: np.nda
         res = extract( out, model, Y, K, P, ctnu, fixed_covars )
 
     res['opt'] = opt
-    res['out'] = out
+    #res['out'] = out
 
     return( res )
 
