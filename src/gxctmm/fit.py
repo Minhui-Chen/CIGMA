@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 import re, os, sys
 import numpy as np, pandas as pd
+from numpy import linalg
 
 from ctmm import wald, ctp
 from . import log, util
@@ -25,7 +26,7 @@ def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, K: np.nda
     N, C = ctnu.shape
     A = hom_g2 * np.ones((C,C)) + V
     B = hom_e2 * np.ones((C,C)) + W
-    Vy = np.kron(K, A) + np.kron(np.eye(N), B) + np.diag( vs.flatten() )
+    Vy = np.kron(K, A) + np.kron(np.eye(N), B) + np.diag( ctnu.flatten() )
 
     return( Vy )
 
@@ -61,7 +62,7 @@ def LL(y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, hom_g2: fl
 
     # calculate loglikelihood
     det_Vy = np.sum( np.log(w) )
-    det_XVyX = np.linalg.slogdet(m2)[1]
+    det_XVyX = linalg.slogdet(m2)[1]
     yBy = y @ v @ np.diag(1/w) @ v.T @ y - y @ m1.T @ linalg.inv(m2) @ m1 @ y
     L = det_Vy + det_XVyX + yBy
     L = 0.5 * L
@@ -139,9 +140,8 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
 
     N, C = Y.shape
     y = Y.flatten()
-    D = np.diag( nu.flatten() )
     # projection matrix
-    proj = np.eye(N * C) - X @ np.linalg.inv(X.T @ X) @ X.T
+    proj = np.eye(N * C) - X @ linalg.inv(X.T @ X) @ X.T
 
     # vec(M @ A @ M)^T @ vec(M @ B @ M) = vec(M @ A)^T @ vec((M @ B)^T)
     # when A, B, and M are symmetrix
@@ -184,7 +184,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
     
     QTQ = np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
     Qt = np.array([m.flatten('F') for m in Q]) @ t
-    theta = np.linalg.inv(QTQ) @ Qt
+    theta = linalg.inv(QTQ) @ Qt
 
     return(theta)
 
@@ -269,7 +269,7 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray, fixe
         hom_g2 = np.var(y - X @ beta) / 2
         par = [hom_g2] * 2
 
-    res = _reml( screml_hom_loglike, par, 'hom', Y, K, P, ctnu, fixed_covars, method, nrep=nrep )
+    res = _reml( hom_REML_loglike, par, 'hom', Y, K, P, ctnu, fixed_covars, method, nrep=nrep )
 
     return({'hom_g2':res['hom_g2'], 'hom_e2':res['hom_e2'], 'beta':res['beta'], 
         'opt':res['opt']})
@@ -319,14 +319,14 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
         hom_g2 = np.var(y - X @ beta) / 4
         par = [hom_g2] * (2 + 2*C) 
 
-    res = _reml(screml_free_loglike, par, 'free', Y, K, P, ctnu, fixed_covars, method, nrep=nrep)
+    res = _reml(free_REML_loglike, par, 'free', Y, K, P, ctnu, fixed_covars, method, nrep=nrep)
 
     if jk:
         jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
         for i in range(N):
             Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, {}, P)
 
-            res_jk = _reml(screml_free_loglike, par, 'free', Y_jk, K_jk, P_jk, ctnu_jk, 
+            res_jk = _reml(free_REML_loglike, par, 'free', Y_jk, K_jk, P_jk, ctnu_jk, 
                     fixed_covars_jk, method, nrep=nrep)
 
             jacks['ct_beta'].append( res_jk['beta']['ct_beta'] )
@@ -340,8 +340,8 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
         var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
 
         p = {
-                'V': wald.mvwald_test(np.diag(res['V']), np.zeros(C), var_V, n=N, P=n_par)
-                'W': wald.mvwald_test(np.diag(res['W']), np.zeros(C), var_W, n=N, P=n_par)
+                'V': wald.mvwald_test(np.diag(res['V']), np.zeros(C), var_V, n=N, P=n_par),
+                'W': wald.mvwald_test(np.diag(res['W']), np.zeros(C), var_W, n=N, P=n_par),
                 'VW': wald.mvwald_test( np.append(np.diag(res['V']),np.diag(res['W'])), np.zeros(2*C), 
                     var_VW, n=N, P=n_par),
                 'ct_beta': util.wald_ct_beta(res['beta']['ct_beta'], var_ct_beta, n=N, P=n_par),
@@ -349,7 +349,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
     else:
         p = {}
 
-    return( results, p )
+    return( res, p )
 
 def full_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray) -> float:
     '''
@@ -400,7 +400,7 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
         V = W = np.diag(np.ones(C))[np.tril_indices(C)] * hom_g2
         par = list(V) + list(W)
 
-    res = _reml(screml_full_loglike, par, 'full', Y, K, P, ctnu, fixed_covars, method, nrep=nrep)
+    res = _reml(full_REML_loglike, par, 'full', Y, K, P, ctnu, fixed_covars, method, nrep=nrep)
 
     return( res )
 
@@ -414,7 +414,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> d
 
     # GLS to get beta
     Vy = cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
-    beta = util.glse( Vy, X, y )
+    beta = util.glse( Vy, X, Y.flatten() )
     # calcualte variance of fixed and random effects, and convert to dict
     beta, fixed_vars = util.cal_variance(beta, P, {}, {}, {})[:2]
     ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
@@ -424,7 +424,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> d
             'ct_overall_g_var':ct_overall_g_var, 'ct_specific_g_var':ct_specific_g_var, 
             'ct_overall_e_var':ct_overall_e_var, 'ct_specific_e_var':ct_specific_e_var} )
 
-def free_HE(Y: str, K str, ctnu: str, P: str) -> Tuple[dict, dict]:
+def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> Tuple[dict, dict]:
     '''
     Fitting Free model with HE
 
@@ -458,7 +458,7 @@ def free_HE(Y: str, K str, ctnu: str, P: str) -> Tuple[dict, dict]:
         jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
         jacks['V'].append( np.diag(out_jk['V']) )
         jacks['W'].append( np.diag(out_jk['W']) )
-        jacks['VW'].append( np.append( (np.diag(out_jk['V']), np.diag(out_jk['W'])) ) )
+        jacks['VW'].append( np.append( np.diag(out_jk['V']), np.diag(out_jk['W']) ) )
 
     var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
     var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
@@ -473,7 +473,7 @@ def free_HE(Y: str, K str, ctnu: str, P: str) -> Tuple[dict, dict]:
             }
     return(out, p)
 
-def full_HE(Y: str, K: str, ctnu: str, P: str) -> dict:
+def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> dict:
     '''
     Fitting Full model with HE
 
