@@ -99,6 +99,13 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
         W = np.diag( out['x'][(2+C):(2+2*C)] )
         ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
         ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
+    elif model == 'freeW':
+        hom_g2 = out['x'][0]
+        hom_e2 = out['x'][1]
+        W = np.diag( out['x'][2:(2+C)] )
+        V = np.zeros((C,C))
+        ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
+        ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
     elif model == 'full':
         V = np.zeros((C,C))
         V[np.tril_indices(C)] = out['x'][:ngam]
@@ -273,6 +280,53 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray, fixe
 
     return( res )
 
+def freeW_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray) -> float:
+    '''
+    Loglikelihood function for REML under FreeW model, where env is Free and genetic is Hom
+    '''
+    N, C = ctnu.shape
+    hom_g2 = par[0]
+    hom_e2 = par[1]
+    W = np.diag(par[2:(C+2)])
+    V = np.zeros((C,C))
+
+    l = LL(y, K, X, ctnu, hom_g2, hom_e2, V, W)
+    return( l )
+
+def freeW_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_covars:dict={}, 
+        par:list=None, method:str=None, nrep:int=10) -> dict:
+    '''
+    Fit FreeW model using REML, where env is Free and genetic is Hom
+
+    Parameters:
+        Y:  cell type-specific pseudobulk
+        K:  kinship matrix
+        P:  cell type proportions
+        ctnu:   cell type-specific noise variance
+        fixed_covars:   design matrices for Extra fixed effects
+        par:    initial parameters
+        method: optimization method, e.g. BFGS
+        nrep:   number of optimization repeats when initial optimization failed
+    Returns:
+        dict of model parameters and statistics
+    '''
+
+    log.logger.info('Fitting Free model with REML')
+
+    N, C = Y.shape
+    y = Y.flatten()
+    X = ctp.get_X( fixed_covars, N, C )
+    n_par = 2 + 2 * C + X.shape[1]
+
+    if par is None:
+        beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
+        hom_g2 = np.var(y - X @ beta) / 4
+        par = [hom_g2] * (2 + 2*C) 
+
+    res = _reml(freeW_REML_loglike, par, 'freeW', Y, K, P, ctnu, fixed_covars, method, nrep=nrep)
+
+    return( res )
+
 def free_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray) -> float:
     '''
     Loglikelihood function for REML under Free model
@@ -300,6 +354,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
         par:    initial parameters
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats when initial optimization failed
+        jk: jackknife to estimation dispersion matirx
     Returns:
         a tuple of 
             #.  dict of model parameters and statistics
