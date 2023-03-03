@@ -90,7 +90,7 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
 
     if model == 'hom':
         hom_g2, hom_e2 = out['x']
-        V = W = None
+        V = W = np.zeros((C,C))
         ct_overall_g_var = ct_overall_e_var = 0
     elif model == 'free':
         hom_g2 = out['x'][0]
