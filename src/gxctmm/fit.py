@@ -258,6 +258,8 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray, fixe
         a dict of model parameters and statistics
     '''
 
+    log.logger.info('Fitting Hom model with REML')
+
     N, C = Y.shape
     y = Y.flatten()
     X = ctp.get_X( fixed_covars, N, C )
@@ -304,6 +306,8 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
             #.  dict of model parameters and statistics
             #.  dict of p values
     '''
+
+    log.logger.info('Fitting Free model with REML')
 
     N, C = Y.shape
     y = Y.flatten()
@@ -382,6 +386,8 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
     Returns:
         dict of model parameters and statistics
     '''
+
+    log.logger.info('Fitting Full model with REML')
 
     N, C = Y.shape
     ngam = C*(C+1) // 2
