@@ -1,9 +1,10 @@
-import time, re, os
+import time, re, os, logging
 import numpy as np, pandas as pd
 
-from gxctmm import fit
+from gxctmm import fit, util, log 
 
 def main():
+    #
     out_fs = []
     for i in snakemake.params.batches:
         out_f = re.sub('/rep/', f'/rep{i}/', snakemake.params.out)
@@ -15,14 +16,32 @@ def main():
     ctnu_fs = [line.strip() for line in open(snakemake.input.ctnu)]
 
     for i in range(len(Y_fs)):
+
+        log.logger.info(f'{Y_fs[i]}')
+        log.logger.info(f'{K_fs[i]}')
+        log.logger.info(f'{ctnu_fs[i]}')
+        log.logger.info(f'{P_fs[i]}')
+
         Y = np.loadtxt( Y_fs[i] )
-        Z = np.loadtxt( Z_fs[i] )
+        K = np.loadtxt( K_fs[i] )
         P = np.loadtxt( P_fs[i] )
         ctnu = np.loadtxt( ctnu_fs[i] )
 
-        free, free_p = fit.free_REML(Y, Z, P, ctnu, jk=False)
+        N, C = Y.shape
 
-        out = { 'free':free, 'wald':free_p} }
+        # fit hom
+        hom = fit.hom_REML(Y, K, P, ctnu)
+        # fit freeW
+        freeW = fit.freeW_REML(Y, K, P, ctnu)
+        # fit free
+        free, free_p = fit.free_REML(Y, K, P, ctnu, jk=False)
+
+        # LRT
+        free_freeW = util.lrt(free['opt']['l'], freeW['opt']['l'], k=C)
+        free_hom = util.lrt(free['opt']['l'], hom['opt']['l'], k=2*C)
+
+        out = { 'hom': hom, 'free':free, 'wald':free_p,
+                'lrt': {'free_freeW':free_freeW, 'free_hom':free_hom}   }
 
         os.makedirs( os.path.dirname(out_fs[i]), exist_ok=True )
         np.save( out_fs[i], out )
