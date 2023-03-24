@@ -1,0 +1,107 @@
+import sys
+import numpy as np, pandas as pd
+
+#######################################################################################
+# Perez 2022 Science
+#######################################################################################
+rule perez_extract_meta:
+    input:
+        h5ad = 'data/Perez2022Science/local.h5ad', 
+    output:
+        meta = 'data/Perez2022Science/meta.txt',
+        genes = 'data/Perez2022Science/genes.txt',
+    run:
+        import scanpy as sc
+
+        data = sc.read_h5ad(input.h5ad, backed='r')
+        meta = data.obs.reset_index(drop=False, names='cell')
+        meta.to_csv(output.meta, sep='\t', index=False)
+
+        genes = data.var.reset_index(drop=False, names='feature')
+        genes.to_csv(output.genes, sep='\t', index=False)
+
+rule perez_extract_counts:
+    input:
+        h5ad = 'data/Perez2022Science/local.h5ad', 
+        genes = 'data/Perez2022Science/genes.txt',
+    output:
+        ctp = 'data/Perez2022Science/ctp.gz',
+        ctnu = 'data/Perez2022Science/ctnu.gz',
+        P = 'data/Perez2022Science/P.gz',
+    params:
+        #path = 'staging/data/Perez2022Science/',
+        ind_col = 'ind_cov',
+        ct_col = 'author_cell_type',
+    resources:
+        mem_mb = '50G',
+        time = '12:00:00',
+    run:
+        import os, time, shutil
+        import scanpy as sc
+        from ctmm import preprocess 
+
+        def pbulk(ann, genes):
+            data = ann[(~ann.obs[params.ind_col].isna()) & (~ann.obs[params.ct_col].isna()), genes]
+            print( data.X.shape )
+            ctp, ctnu, P = preprocess.pseudobulk(ann=data, ind_cut=100, ct_cut=10,
+                    ind_col=params.ind_col, ct_col=params.ct_col)
+            return( ctp, ctnu, P )
+
+        genes = pd.read_table(input.genes)
+
+        genes = genes.loc[~genes['feature_is_filtered'], 'feature'].to_numpy()
+        #gene_batches = np.array_split( genes, 2 )
+        #ctps = []
+        #ctnus = []
+        
+        ann = sc.read_h5ad(input.h5ad, backed='r')
+        ctp, ctnu, P = pbulk(ann, genes)
+        #for i, batch in enumerate(gene_batches):
+            #print(i, flush=True)
+            #ctp, ctnu, P = pbulk(ann, batch)
+            #ctps.append( ctp )
+            #ctnus.append( ctnu )
+
+        # merge
+        #print( len(ctps) )
+        #ctp = pd.concat(ctps, axis=1)
+        #ctnu = pd.concat(ctnus, axis=1)
+
+        # save
+        ctp.to_csv(output.ctp, sep='\t')
+        ctnu.to_csv(output.ctnu, sep='\t')
+        P.to_csv(output.P, sep='\t')
+
+rule perez_var_ctnu:
+    input:
+        h5ad = 'data/Perez2022Science/local.h5ad', 
+        genes = 'data/Perez2022Science/genes.txt',
+    output:
+        var_ctnu = 'analysis/Perez2022Science/var_nu.gz',
+    params:
+        seed = 123567,
+        gene_no = 10, 
+        ind_col = 'ind_cov',
+        ct_col = 'author_cell_type',
+    script: 'bin/perez/var_ctnu.py'
+#######################################################################################
+# Yazar 2022 Science
+#######################################################################################
+use rule perez_extract_meta as yazar_extract_meta with:
+    input:
+        h5ad = 'data/Yazar2022Science/local.h5ad',
+    output:
+        meta = 'data/Yazar2022Science/meta.txt',
+        genes = 'data/Yazar2022Science/genes.txt',
+
+use rule perez_extract_counts as yazar_extract_counts with:
+    input:
+        h5ad = 'data/Yazar2022Science/local.h5ad',
+        genes = 'data/Yazar2022Science/genes.txt',
+    output:
+        ctp = 'data/Yazar2022Science/ctp.gz',
+        ctnu = 'data/Yazar2022Science/ctnu.gz',
+        P = 'data/Yazar2022Science/P.gz',
+    params:
+        ind_col = 'donor_id',
+        ct_col = 'predicted.celltype.l2',
