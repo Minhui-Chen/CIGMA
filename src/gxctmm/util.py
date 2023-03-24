@@ -62,7 +62,8 @@ def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, d
             #. OptimizeResult object from optimize.minimize
             #. dict of optimization parameters and results
     '''
-    method = 'BFGS' if method is None 
+    if method is None:
+        method = 'BFGS'
     if method == 'BFGS-Nelder':
         out1 = optimize.minimize( fun, par, args=args, method='BFGS' )
         out = optimize.minimize( fun, out1['x'], args=args, method='Nelder-Mead' )
