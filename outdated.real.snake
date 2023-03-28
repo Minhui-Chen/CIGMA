@@ -34,7 +34,6 @@ rule perez_extract_counts:
         ct_col = 'author_cell_type',
     resources:
         mem_mb = '50G',
-        time = '12:00:00',
     run:
         import os, time, shutil
         import scanpy as sc
@@ -72,24 +71,86 @@ rule perez_extract_counts:
         ctnu.to_csv(output.ctnu, sep='\t')
         P.to_csv(output.P, sep='\t')
 
-rule perez_var_ctnu:
+rule perez_var_ctnu_extract_genes:
+    # don't know why it takes a lot of memory to extract the X matrix. 
+    # so extract X before compting var of ctnu
     input:
         h5ad = 'data/Perez2022Science/local.h5ad', 
         genes = 'data/Perez2022Science/genes.txt',
     output:
-        var_ctnu = 'analysis/Perez2022Science/var_nu.gz',
+        counts = 'staging/data/Perez2022Science/var_ctnu.genes.npz',
+        genes = 'staging/data/Perez2022Science/var_ctnu.genes.txt',
     params:
         seed = 123567,
         gene_no = 10, 
+    resources:
+        mem_mb = '50G',
+    run:
+        import scanpy as sc
+        from scipy import sparse
+
+        ann = sc.read_h5ad(input.h5ad, backed='r')
+
+        genes = pd.read_table(input.genes, sep='\t')
+        genes = genes.loc[~genes['feature_is_filtered'], 'feature'].to_numpy()
+        # random select genes
+        rng = np.random.default_rng(seed=params.seed)
+        genes = rng.choice(genes, params.gene_no, replace=False)
+        with open(output.genes, 'w') as f:
+            f.write( '\n'.join(genes.tolist()) )
+
+        data = ann[:,genes].X
+        sparse.save_npz(output.counts, data)
+
+rule perez_var_ctnu:
+    input:
+        meta = 'data/Perez2022Science/meta.txt',
+        counts = 'staging/data/Perez2022Science/var_ctnu.genes.npz',
+        genes = 'staging/data/Perez2022Science/var_ctnu.genes.txt',
+    output:
+        var_ctnu = 'analysis/Perez2022Science/var_nu.gz',
+    params:
         ind_col = 'ind_cov',
         ct_col = 'author_cell_type',
-    script: 'bin/perez/var_ctnu.py'
+    resources:
+        mem_mb = '2G',
+    run:
+        from scipy import stats, sparse
+
+        counts = sparse.load_npz(input.counts)
+        meta = pd.read_table(input.meta)
+        meta = meta.rename(columns={params.ind_col:'ind', params.ct_col:'ct'})
+        genes = [line.strip() for line in open(input.genes)]
+
+        # pairs of ind and ct
+        ind_ct = meta.loc[(~meta['ind'].isna()) & (~meta['ct'].isna()), ['ind', 'ct']].drop_duplicates()
+
+        # bootstrap
+        boots = {'ind':[], 'ct':[], 'var_ctnu':[]}
+        for index, row in ind_ct.iterrows():
+            print( index, flush=True )
+            ind, ct = row['ind'], row['ct']
+            data = counts[(meta['ind']==ind) & (meta['ct']==ct), :].toarray()
+            if data.shape[0] < 10:
+                continue
+            else:
+                var_ctnu = stats.bootstrap((data,), lambda x, axis: stats.sem(x,axis=axis)**2 ).standard_error**2
+            boots['ind'].append( ind )
+            boots['ct'].append( ct )
+            boots['var_ctnu'].append( var_ctnu )
+
+        var_ctnu = pd.DataFrame(data=boots['var_ctnu'], columns=genes) # double check the order of genes is correct
+        var_ctnu['ind'] = boots['ind']
+        var_ctnu['ct'] = boots['ct']
+        var_ctnu.to_csv(output.var_ctnu, sep='\t')
+        
+
 #######################################################################################
 # Yazar 2022 Science
 #######################################################################################
 use rule perez_extract_meta as yazar_extract_meta with:
     input:
-        h5ad = 'data/Yazar2022Science/local.h5ad',
+        h5ad = '../outdated_GxCTMM/data/Yazar2022Science/local.h5ad',
     output:
         meta = 'data/Yazar2022Science/meta.txt',
         genes = 'data/Yazar2022Science/genes.txt',
@@ -102,6 +163,28 @@ use rule perez_extract_counts as yazar_extract_counts with:
         ctp = 'data/Yazar2022Science/ctp.gz',
         ctnu = 'data/Yazar2022Science/ctnu.gz',
         P = 'data/Yazar2022Science/P.gz',
+    params:
+        ind_col = 'donor_id',
+        ct_col = 'predicted.celltype.l2',
+
+use rule perez_var_ctnu_extract_genes as yazar_var_ctnu_extract_genes with:
+    input:
+        h5ad = 'data/Yazar2022Science/local.h5ad', 
+        genes = 'data/Yazar2022Science/genes.txt',
+    output:
+        counts = 'staging/data/Yazar2022Science/var_ctnu.genes.npz',
+        genes = 'staging/data/Yazar2022Science/var_ctnu.genes.txt',
+    params:
+        seed = 123567,
+        gene_no = 10, 
+
+use rule perez_var_ctnu as yazar_var_ctnu with:
+    input:
+        meta = 'data/Yazar2022Science/meta.txt',
+        counts = 'staging/data/Yazar2022Science/var_ctnu.genes.npz',
+        genes = 'staging/data/Yazar2022Science/var_ctnu.genes.txt',
+    output:
+        var_ctnu = 'analysis/Yazar2022Science/var_nu.gz',
     params:
         ind_col = 'donor_id',
         ct_col = 'predicted.celltype.l2',
