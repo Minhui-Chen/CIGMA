@@ -57,7 +57,7 @@ def LL(y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, hom_g2: fl
         return(1e12)
     
     # calculate B matrix
-    m1 = X.T @ v @ np.diag(1/w) @ v.T
+    m1 = X.T @ v @ np.diag(1/w) @ v.T 
     m2 = m1 @ X
 
     # calculate loglikelihood
@@ -164,14 +164,19 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
         return( L )
 
     if model == 'free':
-        Q = [   proj @ np.kron(K, np.ones((C,C))), 
-                proj @ np.kron(np.eye(N), np.ones((C,C))) ]
+        A = np.kron(K, np.ones((C,C)))
+        B = np.kron(np.eye(N), np.ones((C,C)))
+        Q = [   A - X @ linalg.inv(X.T @ X) @ (X.T @ A), # proj @ np.kron(K, np.ones((C,C)))
+                B - X @ linalg.inv(X.T @ X) @ (X.T @ B) # proj @ np.kron(np.eye(N), np.ones((C,C)))
+                ]
         for c in range(C):
             L = L_f(C, c, c)
-            Q.append( proj @ np.kron(K, L) )
+            M = np.kron(K, L)
+            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
         for c in range(C):
             L = L_f(C, c, c)
-            Q.append( proj @ np.kron(np.eye(N), L) )
+            M = np.kron(np.eye(N), L)
+            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N), L)
     elif model == 'full':
         Q = []
         for c in range(C):
@@ -311,7 +316,7 @@ def freeW_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_
         dict of model parameters and statistics
     '''
 
-    log.logger.info('Fitting Free model with REML')
+    log.logger.info('Fitting FreeW model with REML')
 
     N, C = Y.shape
     y = Y.flatten()
