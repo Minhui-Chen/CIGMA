@@ -597,6 +597,7 @@ def subprocess_popen(cmd: list, log_fn: str=None) -> None:
     -----
 
     '''
+    cmd = [str(x) for x in cmd]
     proc = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE,
             universal_newlines = True)
 
