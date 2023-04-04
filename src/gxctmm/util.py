@@ -1,6 +1,6 @@
 from typing import Tuple, Optional, Union
 
-import os, tempfile, sys
+import os, tempfile, sys, subprocess
 import numpy as np, pandas as pd
 import rpy2.robjects as ro
 from rpy2.robjects import r, pandas2ri, numpy2ri
@@ -562,9 +562,74 @@ def lrt(l: float, l0: float, k: int) -> float:
     p = stats.chi2.sf(Lambda, k)
     return(p)
 
-def generate_tmpfn():
+def generate_tmpfn() -> str:
     tmpf = tempfile.NamedTemporaryFile(delete=False)
     tmpfn = tmpf.name
     tmpf.close()
     print(tmpfn)
     return tmpfn
+
+def subprocess_popen(cmd: list, log_fn: str=None) -> None:
+    '''
+    Run child process using Subprocess.Popen,
+    while capture the stdout, stderr, and the exit code of the child process.
+
+    Parameters
+    ----------
+    cmd : list
+        The command for the child process.
+        (e.g. ['python', 'test.py'])
+    log_fn : str
+        The name of log file to keep stdout & stderr
+
+    Returns
+    -------
+    proc.returncode : str
+                    exit code.
+    stdout : str
+            standard output.
+    stderr : str
+            strandard error.
+    mix : str
+            mix of stdout and stderr
+
+    Notes
+    -----
+
+    '''
+    proc = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE,
+            universal_newlines = True)
+
+    # print cmd. proc.args only work for >= python 3.3
+    try:
+        print(' '.join(proc.args))
+    except:
+        pass
+
+    stdout, stderr = proc.communicate()
+
+    if log_fn is None:
+        sys.stdout.write(stdout)
+        if proc.returncode != 0:
+            sys.stderr.write('*'*20+'\n'+stderr+'*'*20+'\n')
+            print(proc.returncode)
+            raise Exception('child exception!')
+    else:
+        log = open(log_fn, 'w')
+        log.write(stdout)
+        log.close()
+        stdout = open(log_fn).read()
+        sys.stdout.write(stdout)
+        if proc.returncode != 0:
+            log = open(log_fn, 'w')
+            log.write(stderr)
+            log.close()
+            stderr = open(log_fn).read()
+            log = open(log_fn, 'w')
+            log.write(stdout+'\n')
+            log.write('*'*20+'\n'+stderr+'*'*20+'\n')
+            log.close()
+            sys.stderr.write('*'*20+'\n'+stderr+'*'*20+'\n')
+            print(proc.returncode)
+            raise Exception('child exception!')
+
