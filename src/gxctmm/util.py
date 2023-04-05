@@ -1,7 +1,8 @@
 from typing import Tuple, Optional, Union
 
-import os, tempfile, sys, subprocess
+import os, tempfile, sys, subprocess, re
 import numpy as np, pandas as pd
+import numpy.typing as npt
 import rpy2.robjects as ro
 from rpy2.robjects import r, pandas2ri, numpy2ri
 from rpy2.robjects.conversion import localconverter
@@ -9,6 +10,7 @@ from scipy import stats, linalg, optimize
 from numpy.random import default_rng
 
 from ctmm import wald
+from . import log
 
 def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[int] = None) -> tuple:
     '''
@@ -634,3 +636,224 @@ def subprocess_popen(cmd: list, log_fn: str=None) -> None:
             print(proc.returncode)
             raise Exception('child exception!')
 
+def extract_vcf(input_f:str, panel_f: str=None, samples: npt.ArrayLike=None, samples_f: str=None, 
+        pops: npt.ArrayLike=None, snps_f: str=None, 
+        snps: npt.ArrayLike=None, maf_filter: bool=True, maf: str='0.000000001', 
+        geno: str='1', output_bfile: str=None, bim_only: bool=False, 
+        output_vcf_prefix: str=None, update_bim: bool=True,
+        ldprune: bool=False, ld_window_size: str='50', ld_step_size: str='5', 
+        ld_r2_threshold: str='0.2', memory: str=None, additional_operations: list=None
+        ) -> None:
+    '''
+    Extract samples in pops from 1000G using PLINK (v 1.9).
+
+    Parameters
+    ----------
+    input_f:    input filename for vcf or bed/bim. If the input file is not end with .vcf/vcf.gz, assume bfile.
+    panel_f:    required when pops argu used. 
+                Panel filename with at least columns of sample, pop, and super_pop, as in 1000G.
+    samples:    a list of sample IDs.
+    samples_f:  Sample file used for plink extracting individuals: without header, two columns, both of which are IID.
+    pops:   a list of (super)populations to extract.
+    snps_f: a file with one snp per line, without header. Only support output bfile.
+    snps:   a list of snps. Only support output bfile.
+    maf_filter: whether filter variants on maf
+    maf:    maf threshold
+    geno:   filters out all variants with missing call rates exceeding the provided value
+    output_bfile:   prefix for output bfile bed/bim 
+    bim_only:   output bim file only --make-just-bim
+    update_bim: update the snpname to chr_pos_a2_a1 in bim file.
+    output_vcf_prefix:  Prefix for output vcf filename ({output_vcf_prefix}.vcf.bgz).
+    memory: memory for plink
+    additional_operations:  additional options to give to plink
+
+    # LD prune
+    ldprune:    Plink variant pruning using --indep-pairwise
+    ld_window_size: a window size in variant count
+    ld_step_size:   a variant count to shift the window at the end of each step
+    ld_r2_threshold:    r2 threshold
+
+    Notes
+    -----
+    Exclude monopolymorphic variants.
+    vcf-half-cal treated as missing.
+    '''
+
+    operations = ['--geno', geno] 
+    if memory is not None:
+        operations += ['--memory', memory]
+
+    # input file options: vcf file or bfile
+    if re.search('(\.vcf$|\.vcf\.gz$)', input_f):
+        operations += ['--vcf', input_f, '--double-id', '--keep-allele-order', '--vcf-half-call', 'missing']
+    else:
+        operations += ['--bfile', input_f]
+
+    # make sample file for plink
+    if samples_f:
+        operations += ['--keep', samples_f]
+    elif samples is not None:
+        samples = pd.DataFrame({'sample': samples})
+        samples_f = generate_tmpfn()
+        samples[['sample', 'sample']].to_csv(samples_f, sep='\t', index=False, header=False)
+        operations += ['--keep', samples_f]
+    elif pops is not None:
+        panel = pd.read_table( panel_f )
+        panel = panel.loc[np.isin(panel['pop'], pops) | np.isin(panel['super_pop'], pops)]
+        panel = panel.reset_index(drop=True)
+        samples_f = generate_tmpfn()
+        panel[['sample', 'sample']].to_csv(samples_f, sep='\t', index=False, header=False)
+        operations += ['--keep', samples_f]
+
+    # extract snps after updating snp names in bim file
+    if snps_f:
+        pass
+    elif snps is not None:
+        snps_f = generate_tmpfn()
+        snps = pd.DataFrame({'snp': snps})
+        snps[['snp']].to_csv(snps_f, sep='\t', index=False, header=False)
+
+    # maf filter
+    if maf_filter:
+        operations += ['--maf', str(maf)]
+
+    if additional_operations is not None:
+        operations += additional_operations
+
+    # extract samples to bfile
+    if output_bfile:
+        if bim_only:
+            operations += ['--make-just-bim']
+        else:
+            operations += ['--make-bed']
+        subprocess_popen(['plink', '--out', output_bfile]+operations)
+        if update_bim:
+            update_bim_snpname(output_bfile+'.bim')
+        if snps_f:
+            cmd = ['plink', '--bfile', output_bfile, '--keep-allele-order',
+                    '--extract', snps_f, '--make-bed', '--out', output_bfile]
+            if memory:
+                cmd += ['--memory', memory]
+            subprocess_popen( cmd )
+        if ldprune:
+            plink_ldprune(output_bfile, ld_window_size=ld_window_size, ld_step_size=ld_step_size,
+                    ld_r2_threshold=ld_r2_threshold, output_bfile=output_bfile, memory=memory)
+
+    # extract samples to vcf
+    # double check whether ref allele reserved
+    if output_vcf_prefix:
+        subprocess_popen(['plink2', '--export', 'vcf', 'bgz', 'id-paste=iid',
+                '--out', output_vcf_prefix]+operations)
+
+def plink_ldprune(bfile: str, ld_window_size: str='50', ld_step_size: str='5', ld_r2_threshold: str='0.2',
+        output_bfile: str=None, memory: str=None) -> None:
+    '''
+    Plink variance pruning using --indep-pairwise.
+
+    At each step, pairs of variants in the current window with squared correlation greater than
+    the threshold are noted, and variants are greedily pruned from the window
+    until no such pairs remain.
+
+    Parameters
+    ----------
+    bfile:  Prefix for bfile {bfile}.bed
+    ld_window_size: a window size in variant count
+    ld_step_size:   a variant count to shift the window at the end of each step
+    ld_r2_threshold:    r2 threshold
+    output_bfile: Prefix for pruned bfile. Default: same as {bfile}
+    memory: memory of Plink
+    '''
+    if not output_bfile:
+        output_bfile = bfile+'.ldprune'
+    prunefile_fn = generate_tmpfn()
+    cmd1 = ['plink', '--bfile', bfile, '--indep-pairwise',
+            ld_window_size, ld_step_size, ld_r2_threshold,
+            '--out', prunefile_fn]
+    cmd2 = ['plink', '--bfile', bfile, '--extract',
+            prunefile_fn+'.prune.in', '--memory', memory, '--keep-allele-order',
+            '--make-bed', '--out', output_bfile]
+    if memory:
+        cmd1 += ['--memory', memory]
+        cmd2 += '--memory', memory
+    basic_fun.subprocess_popen( cmd1 )
+    basic_fun.subprocess_popen(cmd2)
+
+def update_bim_snpname(bim_fn: str) -> None:
+    '''
+    Update bim file snpname to chr_pos_a2_a1 (a2 a1 are ref alt if keep-allele-order from vcf)
+
+    Parameters
+    ----------
+    bim_fn: filename of bim
+    '''
+    bim = pd.read_table(bim_fn, header=None, names=['chr', 'snp', 'genetic', 'pos', 'a1', 'a2']) # a2 a1 are ref alt
+    bim['snp'] = bim['chr'].astype('str')+'_'+bim['pos'].astype('str')+'_'+bim['a2']+'_'+bim['a1']
+    bim.to_csv(bim_fn, sep='\t', index=False, header=False)
+
+def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str) -> int:
+    '''
+    Compute kinship matrix for a genomic region (start-r, end+r)
+
+    Parameters:
+        bfile:  prefix for chr/genome bed/bim files
+        chr:    chromosome
+        start:  start position of gene
+        end:    end position of gene 
+        r:  radius to the gene
+        rel:    prefix for relationship matrix file (prefix.rel.bin)
+    Returns:
+        number of snps in the regions
+    '''
+    start = max(0, start - r)
+    end = end + r
+
+    # check number of SNPs in the region
+    bim = pd.read_csv(bfile+'.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp','a1','a2'])
+    nsnp = bim.loc[(bim['chr']==chr) & (bim['bp'] > start) & (bim['bp'] < end)].shape[0]
+    
+    # compute kinship matrix
+    if nsnp > 0:
+        cmd = ['plink', '--bfile', bfile, 
+                '--chr', chr, '--from-bp', start, '--to-bp', end,
+                '--make-rel', 'bin',
+                '--out', rel]
+        subprocess_popen( cmd )
+
+    return( nsnp )
+
+def collect_covariates(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, sex: pd.Series=None, age: pd.Series=None):
+    '''
+    Read covariates
+
+    Parameters:
+        inds:   order of individuals
+        pca:    dataframe of pcs, with index: individuals (sort not required) and columns (PC1-PCx)
+        PC: number to PC to adjust
+        sex:    series of two unique elements corresponding to male and female
+        age:    age
+
+    Returns:
+        a dict of covariate design matrices
+    '''
+
+    fixed_covars = {}
+    random_covars = {}
+    #covars_f = generate_tmpfn()
+    # pca
+    if pca is not None:
+        pcs = [f'PC{i}' for i in range(1, int(PC))]
+        pca = pca.loc[inds, pcs]
+        fixed_covars['pca'] = pca.to_numpy()
+    # sex 
+    if sex is not None:
+        # Get unique values
+        vals = sex.unique()
+        val_map = {val: i for i, val in enumerate(vals)}
+        sex = sex.map(val_map)
+        fixed_covars['sex'] = sex[inds].to_numpy()
+        if len(vs) == 1:
+            log.logger.info('Only one sex in the dataset')
+    if age is not None:
+        fixed_covars['age'] = age[inds].to_numpy()
+    
+    return(fixed_covars, random_covars)
