@@ -841,7 +841,7 @@ def collect_covariates(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None
     #covars_f = generate_tmpfn()
     # pca
     if pca is not None:
-        pcs = [f'PC{i}' for i in range(1, int(PC))]
+        pcs = [f'PC{i}' for i in range(1, int(PC)+1)]
         pca = pca.loc[inds, pcs]
         fixed_covars['pca'] = pca.to_numpy()
     # sex 
