@@ -463,9 +463,10 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
 
     return( res )
 
-def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> dict:
+def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict=None
+        ) -> dict:
     N, C = Y.shape
-    X = ctp.get_X({}, N, C)
+    X = ctp.get_X(fixed_covars, N, C)
 
     theta = he_ols(Y, K, X, ctnu, 'free')
     hom_g2, hom_e2 = theta[0], theta[1]
@@ -475,7 +476,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> d
     Vy = cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
     beta = util.glse( Vy, X, Y.flatten() )
     # calcualte variance of fixed and random effects, and convert to dict
-    beta, fixed_vars = util.cal_variance(beta, P, {}, {}, {})[:2]
+    beta, fixed_vars = util.cal_variance(beta, P, fixed_covars, {}, {})[:2]
     ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
     ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
 
@@ -483,7 +484,8 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> d
             'ct_overall_g_var':ct_overall_g_var, 'ct_specific_g_var':ct_specific_g_var, 
             'ct_overall_e_var':ct_overall_e_var, 'ct_specific_e_var':ct_specific_e_var} )
 
-def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> Tuple[dict, dict]:
+def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict=None
+        ) -> Tuple[dict, dict]:
     '''
     Fitting Free model with HE
 
@@ -492,6 +494,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> Tu
         K:    kinship matrix 
         ctnu: cell type-specific noise variance (no header no index)
         P:    cell type proportions
+        fixed_covars:   design matrices for Extra fixed effects
 
     Returns:
         a tuple of
@@ -502,17 +505,17 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> Tu
     log.logger.info('Fitting Free model with HE')
 
     N, C = Y.shape 
-    X = ctp.get_X({}, N, C)
+    X = ctp.get_X(fixed_covars, N, C)
     n_par = 2 + 2 * C + X.shape[1]
 
-    out = _free_he(Y, K, ctnu, P)
+    out = _free_he(Y, K, ctnu, P, fixed_covars)
     out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
 
     # jackknife
     jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
     for i in range(N):
-        Y_jk, K_jk, ctnu_jk, _, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, P=P)
-        out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk )
+        Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, P=P)
+        out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk )
 
         jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
         jacks['V'].append( np.diag(out_jk['V']) )
@@ -532,7 +535,8 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> Tu
             }
     return(out, p)
 
-def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> dict:
+def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict=None
+        ) -> dict:
     '''
     Fitting Full model with HE
 
@@ -541,6 +545,7 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> di
         K:    kinship matrix 
         ctnu: cell type-specific noise variance (no header no index)
         P:    cell type proportions
+        fixed_covars:   design matrices for Extra fixed effects
 
     Returns:
         a dictionary of parameter estimates
@@ -550,7 +555,7 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray) -> di
 
     N, C = Y.shape 
     ntril = (C-1) * C // 2
-    X = ctp.get_X({}, N, C)
+    X = ctp.get_X(fixed_covars, N, C)
 
     theta = he_ols(Y, K, X, ctnu, 'full')
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
