@@ -24,9 +24,9 @@ def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, K: np.nda
     '''
 
     N, C = ctnu.shape
-    A = hom_g2 * np.ones((C,C)) + V
-    B = hom_e2 * np.ones((C,C)) + W
-    Vy = np.kron(K, A) + np.kron(np.eye(N), B) + np.diag( ctnu.flatten() )
+    A = hom_g2 * np.ones((C,C), dtype='int8') + V
+    B = hom_e2 * np.ones((C,C), dtype='int8') + W
+    Vy = np.kron(K, A) + np.kron(np.eye(N, dtype='int8'), B) + np.diag( ctnu.flatten() )
 
     return( Vy )
 
@@ -148,7 +148,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
     N, C = Y.shape
     y = Y.flatten()
     # projection matrix
-    proj = np.eye(N * C) - X @ linalg.inv(X.T @ X) @ X.T
+    proj = np.eye(N * C, dtype='int8') - X @ linalg.inv(X.T @ X) @ X.T
 
     # vec(M @ A @ M)^T @ vec(M @ B @ M) = vec(M @ A)^T @ vec((M @ B)^T)
     # when A, B, and M are symmetrix
@@ -159,13 +159,13 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
     # build Q: list of coefficients
     def L_f(C, c1, c2):
         # fun to build L matrix
-        L = np.zeros((C,C))
+        L = np.zeros((C,C), dtype='int8')
         L[c1,c2] = 1
         return( L )
 
     if model == 'free':
-        A = np.kron(K, np.ones((C,C)))
-        B = np.kron(np.eye(N), np.ones((C,C)))
+        A = np.kron(K, np.ones((C,C), dtype='int8'))
+        B = np.kron(np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8'))
         Q = [   A - X @ linalg.inv(X.T @ X) @ (X.T @ A), # proj @ np.kron(K, np.ones((C,C)))
                 B - X @ linalg.inv(X.T @ X) @ (X.T @ B) # proj @ np.kron(np.eye(N), np.ones((C,C)))
                 ]
@@ -175,7 +175,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
             Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
         for c in range(C):
             L = L_f(C, c, c)
-            M = np.kron(np.eye(N), L)
+            M = np.kron(np.eye(N, dtype='int8'), L)
             Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N), L)
     elif model == 'full':
         Q = []
@@ -184,7 +184,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
             Q.append( proj @ np.kron(K, L) )
         for c in range(C):
             L = L_f(C, c, c)
-            Q.append( proj @ np.kron(np.eye(N), L) )
+            Q.append( proj @ np.kron(np.eye(N, dtype='int8'), L) )
         for i in range(C-1):
             for j in range(i+1,C):
                 L = L_f(C, i, j) + L_f(C, j, i)
@@ -192,7 +192,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
         for i in range(C-1):
             for j in range(i+1,C):
                 L = L_f(C, i, j) + L_f(C, j, i)
-                Q.append( proj @ np.kron(np.eye(N), L) )
+                Q.append( proj @ np.kron(np.eye(N, dtype='int8'), L) )
     
     QTQ = np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
     Qt = np.array([m.flatten('F') for m in Q]) @ t
@@ -512,6 +512,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
 
     # jackknife
+    log.logger.info('Jackknife')
     jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
     for i in range(N):
         Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, P=P)
