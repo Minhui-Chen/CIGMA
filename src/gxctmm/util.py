@@ -419,8 +419,8 @@ def ct_random_var( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.ndarray]:
 
     return( ct_overall_var, ct_specific_var )
 
-def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[list, np.ndarray, dict], random_covars: dict
-        ) -> Tuple[dict, dict, dict, dict]:
+def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[list, np.ndarray, dict], 
+        random_covars: dict) -> Tuple[dict, dict, dict, dict]:
     '''
     Compute variance explained by fixed effects and random effects
 
@@ -433,10 +433,10 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[
 
     Returns:
         a tuple of 
-            #.  fixed effects
-            #.  OP variance explained by fixed effects
-            #.  random effect variances
-            #.  OP variance explained by random effects
+            #.  dict of fixed effects
+            #.  dict of OP variance explained by fixed effects
+            #.  dict of random effect variances
+            #.  dict of OP variance explained by random effects
     '''
     # calcualte variance of fixed and random effects, and convert to dict
     beta, fixed_vars = fixedeffect_vars( beta, P, fixed_covars ) # fixed effects are always ordered
@@ -444,12 +444,6 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[
         r2 = dict(zip( np.sort(list(random_covars.keys())), r2 ))
     random_vars = RandomeffectVariance( r2, random_covars )
     return( beta, fixed_vars, r2, random_vars )
-
-#def quantnorm(Y, axis=0):
-#    '''
-#    # use sklearn.preprocessing.quantile_transform
-#    '''
-#    pass
 
 def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> float:
     '''
@@ -821,39 +815,28 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str) -> int:
 
     return( nsnp )
 
-def collect_covariates(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, sex: pd.Series=None, age: pd.Series=None):
+def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Series=None, 
+        con: pd.Series=None) -> dict:
     '''
-    Read covariates
+    Construct design matrix
 
     Parameters:
         inds:   order of individuals
         pca:    dataframe of pcs, with index: individuals (sort not required) and columns (PC1-PCx)
         PC: number to PC to adjust
-        sex:    series of two unique elements corresponding to male and female
-        age:    age
+        cat:    series of category elements e.g. sex: male and female
+        con:    series of continuious elements e.g. age
 
     Returns:
-        a dict of covariate design matrices
+        a design matrix
     '''
 
-    fixed_covars = {}
-    random_covars = {}
-    #covars_f = generate_tmpfn()
     # pca
     if pca is not None:
         pcs = [f'PC{i}' for i in range(1, int(PC)+1)]
         pca = pca.loc[inds, pcs]
-        fixed_covars['pca'] = pca.to_numpy()
-    # sex 
-    if sex is not None:
-        # Get unique values
-        vals = sex.unique()
-        val_map = {val: i for i, val in enumerate(vals)}
-        sex = sex.map(val_map)
-        fixed_covars['sex'] = sex[inds].to_numpy()
-        if len(vs) == 1:
-            log.logger.info('Only one sex in the dataset')
-    if age is not None:
-        fixed_covars['age'] = age[inds].to_numpy()
-    
-    return(fixed_covars, random_covars)
+        return( pca )
+    elif cat is not None:
+        return( pd.get_dummies( cat ).loc[inds,:] )
+    elif con is not None:
+        return( con[inds] )
