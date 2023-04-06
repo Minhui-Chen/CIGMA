@@ -837,6 +837,6 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
         pca = pca.loc[inds, pcs]
         return( pca )
     elif cat is not None:
-        return( pd.get_dummies( cat ).loc[inds,:] )
+        return( pd.get_dummies( cat, drop_first=True, dtype='int8' ).loc[inds,:] )
     elif con is not None:
         return( con[inds] )
