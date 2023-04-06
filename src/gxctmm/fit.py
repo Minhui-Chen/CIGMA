@@ -627,7 +627,6 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     X = ctp.get_X(fixed_covars, N, C)
 
     theta = he_ols(Y, K, X, ctnu, 'full')
-    log.logger.info('Full model OLS Done')
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
     V[np.triu_indices(C,k=1)] = theta[(C*2):(C*2 + ntril)]
     V = V + V.T - np.diag(theta[:C])
@@ -638,6 +637,5 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
 
     he = {'V': V, 'W': W, 'ct_overall_g_var':ct_overall_g_var, 'ct_overall_e_var':ct_overall_e_var}
-    log.logger.info('Full model Done')
     return( he )
 
