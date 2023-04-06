@@ -181,18 +181,22 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
         Q = []
         for c in range(C):
             L = L_f(C, c, c)
-            Q.append( proj @ np.kron(K, L) )
+            M = np.kron(K, L)
+            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
         for c in range(C):
             L = L_f(C, c, c)
-            Q.append( proj @ np.kron(np.eye(N, dtype='int8'), L) )
+            M = np.kron(np.eye(N, dtype='int8'), L)
+            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N, dtype='int8'), L)
         for i in range(C-1):
             for j in range(i+1,C):
                 L = L_f(C, i, j) + L_f(C, j, i)
-                Q.append( proj @ np.kron(K, L) )
+                M = np.kron(K, L)
+                Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
         for i in range(C-1):
             for j in range(i+1,C):
                 L = L_f(C, i, j) + L_f(C, j, i)
-                Q.append( proj @ np.kron(np.eye(N, dtype='int8'), L) )
+                M = np.kron(np.eye(N, dtype='int8'), L)
+                Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N, dtype='int8'), L)
     
     QTQ = np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
     Qt = np.array([m.flatten('F') for m in Q]) @ t
@@ -510,6 +514,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
 
     out = _free_he(Y, K, ctnu, P, fixed_covars)
     out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
+    log.logger.info(out['nu'].dtype)
 
     # jackknife
     log.logger.info('Jackknife')
