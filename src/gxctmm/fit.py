@@ -463,7 +463,7 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
 
     return( res )
 
-def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict=None
+def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
         ) -> dict:
     N, C = Y.shape
     X = ctp.get_X(fixed_covars, N, C)
@@ -484,7 +484,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
             'ct_overall_g_var':ct_overall_g_var, 'ct_specific_g_var':ct_specific_g_var, 
             'ct_overall_e_var':ct_overall_e_var, 'ct_specific_e_var':ct_specific_e_var} )
 
-def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict=None
+def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
         ) -> Tuple[dict, dict]:
     '''
     Fitting Free model with HE
@@ -535,7 +535,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
             }
     return(out, p)
 
-def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict=None
+def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
         ) -> dict:
     '''
     Fitting Full model with HE
