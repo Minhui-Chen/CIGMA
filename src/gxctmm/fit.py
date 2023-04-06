@@ -164,42 +164,105 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
         return( L )
 
     if model == 'free':
-        A = np.kron(K, np.ones((C,C), dtype='int8'))
-        B = np.kron(np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8'))
-        Q = [   A - X @ linalg.inv(X.T @ X) @ (X.T @ A), # proj @ np.kron(K, np.ones((C,C)))
-                B - X @ linalg.inv(X.T @ X) @ (X.T @ B) # proj @ np.kron(np.eye(N), np.ones((C,C)))
-                ]
-        for c in range(C):
-            L = L_f(C, c, c)
-            M = np.kron(K, L)
-            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
-        for c in range(C):
-            L = L_f(C, c, c)
-            M = np.kron(np.eye(N, dtype='int8'), L)
-            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N), L)
+        if N * C < 5000:
+            A = np.kron(K, np.ones((C,C), dtype='int8'))
+            B = np.kron(np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8'))
+            Q = [   A - X @ linalg.inv(X.T @ X) @ (X.T @ A), # proj @ np.kron(K, np.ones((C,C)))
+                    B - X @ linalg.inv(X.T @ X) @ (X.T @ B) # proj @ np.kron(np.eye(N), np.ones((C,C)))
+                    ]
+            for c in range(C):
+                L = L_f(C, c, c)
+                M = np.kron(K, L)
+                Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
+            for c in range(C):
+                L = L_f(C, c, c)
+                M = np.kron(np.eye(N, dtype='int8'), L)
+                Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N), L)
+            Q1 = np.array([m.flatten('F') for m in Q])
+            Q2 = np.array([m.flatten() for m in Q])
+        else:
+            # Q1 and Q2 matrix take too much memory, so use memmap to save memory
+            log.logger.info('Memmory saveing mode')
+            
+            # make memmap file
+            tmpfn = util.generate_tmpfn()
+            Q1_f = tmpfn+'.Q1'
+            Q2_f = tmpfn+'.Q2'
+            Q1 = np.memmap(Q1_f, dtype=X.dtype, mode="w+", shape=(2*C+2, (N*C)**2))
+            Q2 = np.memmap(Q2_f, dtype=X.dtype, mode="w+", shape=(2*C+2, (N*C)**2))
+
+            A = np.kron(K, np.ones((C,C), dtype='int8'))
+            M = A - X @ linalg.inv(X.T @ X) @ (X.T @ A)
+            Q1[0,:] = M.flatten('F')
+            Q2[0,:] = M.flatten()
+            B = np.kron(np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8'))
+            M = B - X @ linalg.inv(X.T @ X) @ (X.T @ B)
+            Q1[1,:] = M.flatten('F')
+            Q2[1,:] = M.flatten()
+
+            k = 2
+            for c in range(C):
+                L = L_f(C, c, c)
+                M = np.kron(K, L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+                Q1[k,:] = M.flatten('F')
+                Q2[k,:] = M.flatten()
+                k += 1
+            for c in range(C):
+                L = L_f(C, c, c)
+                M = np.kron(np.eye(N, dtype='int8'), L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(np.eye(N), L)
+                Q1[k,:] = M.flatten('F')
+                Q2[k,:] = M.flatten()
+                k += 1
+
+            Q1.flush()
+            Q2.flush()
+
     elif model == 'full':
-        Q = []
+        tmpfn = util.generate_tmpfn()
+        Q1_f = tmpfn+'.Q1'
+        Q2_f = tmpfn+'.Q2'
+        Q1 = np.memmap(Q1_f, dtype=X.dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
+        Q2 = np.memmap(Q2_f, dtype=X.dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
+        k = 0
         for c in range(C):
             L = L_f(C, c, c)
             M = np.kron(K, L)
-            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
+            M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+            Q1[k,:] = M.flatten('F')
+            Q2[k,:] = M.flatten()
+            k += 1
         for c in range(C):
             L = L_f(C, c, c)
             M = np.kron(np.eye(N, dtype='int8'), L)
-            Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N, dtype='int8'), L)
+            M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(np.eye(N, dtype='int8'), L)
+            Q1[k,:] = M.flatten('F')
+            Q2[k,:] = M.flatten()
+            k += 1
         for i in range(C-1):
             for j in range(i+1,C):
                 L = L_f(C, i, j) + L_f(C, j, i)
                 M = np.kron(K, L)
-                Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(K, L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+                Q1[k,:] = M.flatten('F')
+                Q2[k,:] = M.flatten()
+                k += 1
         for i in range(C-1):
             for j in range(i+1,C):
                 L = L_f(C, i, j) + L_f(C, j, i)
                 M = np.kron(np.eye(N, dtype='int8'), L)
-                Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N, dtype='int8'), L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M)  # proj @ np.kron(np.eye(N, dtype='int8'), L)
+                Q1[k,:] = M.flatten('F')
+                Q2[k,:] = M.flatten()
+                k += 1
+        Q1.flush()
+        Q2.flush()
     
-    QTQ = np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
-    Qt = np.array([m.flatten('F') for m in Q]) @ t
+    QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+    Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+
+    # theta
     theta = linalg.inv(QTQ) @ Qt
 
     return(theta)
@@ -564,6 +627,7 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     X = ctp.get_X(fixed_covars, N, C)
 
     theta = he_ols(Y, K, X, ctnu, 'full')
+    log.logger.info('Full model OLS Done')
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
     V[np.triu_indices(C,k=1)] = theta[(C*2):(C*2 + ntril)]
     V = V + V.T - np.diag(theta[:C])
@@ -574,5 +638,6 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
 
     he = {'V': V, 'W': W, 'ct_overall_g_var':ct_overall_g_var, 'ct_overall_e_var':ct_overall_e_var}
+    log.logger.info('Full model Done')
     return( he )
 
