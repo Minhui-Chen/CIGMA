@@ -2,6 +2,9 @@ from typing import Optional, Tuple
 import re, os, sys
 import numpy as np, pandas as pd
 from numpy import linalg
+import zarr
+import dask.array as da
+from memory_profiler import profile 
 
 from ctmm import wald, ctp
 from . import log, util
@@ -180,9 +183,15 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
                 Q.append( M - X @ linalg.inv(X.T @ X) @ (X.T @ M) ) # proj @ np.kron(np.eye(N), L)
             Q1 = np.array([m.flatten('F') for m in Q])
             Q2 = np.array([m.flatten() for m in Q])
+
+            QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+            Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+
+            # theta
+            theta = linalg.inv(QTQ) @ Qt
         else:
             # Q1 and Q2 matrix take too much memory, so use memmap to save memory
-            log.logger.info('Memmory saveing mode')
+            log.logger.info('Memmory saving mode')
             
             # make memmap file
             tmpfn = util.generate_tmpfn()
@@ -219,51 +228,149 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
             Q1.flush()
             Q2.flush()
 
+            QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+            Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+
+            # theta
+            theta = linalg.inv(QTQ) @ Qt
+
+            # clean
+            del Q1
+            del Q2
+            os.remove(Q1_f)
+            os.remove(Q2_f)
+
     elif model == 'full':
-        tmpfn = util.generate_tmpfn()
-        Q1_f = tmpfn+'.Q1'
-        Q2_f = tmpfn+'.Q2'
-        Q1 = np.memmap(Q1_f, dtype=X.dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
-        Q2 = np.memmap(Q2_f, dtype=X.dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
-        k = 0
-        for c in range(C):
-            L = L_f(C, c, c)
-            M = np.kron(K, L)
-            M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
-            Q1[k,:] = M.flatten('F')
-            Q2[k,:] = M.flatten()
-            k += 1
-        for c in range(C):
-            L = L_f(C, c, c)
-            M = np.kron(np.eye(N, dtype='int8'), L)
-            M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(np.eye(N, dtype='int8'), L)
-            Q1[k,:] = M.flatten('F')
-            Q2[k,:] = M.flatten()
-            k += 1
-        for i in range(C-1):
-            for j in range(i+1,C):
-                L = L_f(C, i, j) + L_f(C, j, i)
+        if N * C < 5000:
+            Q = []
+            for c in range(C):
+                L = L_f(C, c, c)
+                M = np.kron(K, L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+                Q.append( M )
+            for c in range(C):
+                L = L_f(C, c, c)
+                M = np.kron(np.eye(N, dtype='int8'), L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(np.eye(N, dtype='int8'), L)
+                Q.append( M )
+            for i in range(C-1):
+                for j in range(i+1,C):
+                    L = L_f(C, i, j) + L_f(C, j, i)
+                    M = np.kron(K, L)
+                    M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+                    Q.append( M )
+            for i in range(C-1):
+                for j in range(i+1,C):
+                    L = L_f(C, i, j) + L_f(C, j, i)
+                    M = np.kron(np.eye(N, dtype='int8'), L)
+                    M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M)  # proj @ np.kron(np.eye(N, dtype='int8'), L)
+                    Q.append( M )
+            Q1 = np.array([m.flatten('F') for m in Q])
+            Q2 = np.array([m.flatten() for m in Q])
+
+            QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+            Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+
+            # theta
+            theta = linalg.inv(QTQ) @ Qt
+        else:
+            # use memmap (bus error when multiple programs run)
+            tmpfn = util.generate_tmpfn()
+            Q1_f = tmpfn+'.Q1'
+            Q2_f = tmpfn+'.Q2'
+            Q1 = np.memmap(Q1_f, dtype=X.dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
+            Q2 = np.memmap(Q2_f, dtype=X.dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
+            k = 0
+            for c in range(C):
+                L = L_f(C, c, c)
                 M = np.kron(K, L)
                 M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
                 Q1[k,:] = M.flatten('F')
                 Q2[k,:] = M.flatten()
                 k += 1
-        for i in range(C-1):
-            for j in range(i+1,C):
-                L = L_f(C, i, j) + L_f(C, j, i)
+            for c in range(C):
+                L = L_f(C, c, c)
                 M = np.kron(np.eye(N, dtype='int8'), L)
-                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M)  # proj @ np.kron(np.eye(N, dtype='int8'), L)
+                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(np.eye(N, dtype='int8'), L)
                 Q1[k,:] = M.flatten('F')
                 Q2[k,:] = M.flatten()
                 k += 1
-        Q1.flush()
-        Q2.flush()
-    
-    QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
-    Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+            for i in range(C-1):
+                for j in range(i+1,C):
+                    L = L_f(C, i, j) + L_f(C, j, i)
+                    M = np.kron(K, L)
+                    M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+                    Q1[k,:] = M.flatten('F')
+                    Q2[k,:] = M.flatten()
+                    k += 1
+            for i in range(C-1):
+                for j in range(i+1,C):
+                    L = L_f(C, i, j) + L_f(C, j, i)
+                    M = np.kron(np.eye(N, dtype='int8'), L)
+                    M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M)  # proj @ np.kron(np.eye(N, dtype='int8'), L)
+                    Q1[k,:] = M.flatten('F')
+                    Q2[k,:] = M.flatten()
+                    k += 1
+            Q1.flush()
+            Q2.flush()
+        
+            QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+            Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
 
-    # theta
-    theta = linalg.inv(QTQ) @ Qt
+            # theta
+            theta = linalg.inv(QTQ) @ Qt
+
+            # clean
+            del Q1
+            del Q2
+            os.remove(Q1_f)
+            os.remove(Q2_f)
+
+        # use zarr (too slow)
+#        tmpfn = util.generate_tmpfn()
+#        Q1_f = tmpfn+'.Q1.zarr'
+#        Q2_f = tmpfn+'.Q2.zarr'
+#        Q1 = zarr.open(Q1_f, dtype=X.dtype, mode="w", shape=(C*(C+1), (N*C)**2), chunks=(10000,10000))
+#        Q2 = zarr.open(Q2_f, dtype=X.dtype, mode="w", shape=(C*(C+1), (N*C)**2), chunks=(10000,10000))
+#        k = 0
+#        for c in range(C):
+#            L = L_f(C, c, c)
+#            M = np.kron(K, L)
+#            M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+#            Q1[k,:] = M.flatten('F')
+#            Q2[k,:] = M.flatten()
+#            k += 1
+#        for c in range(C):
+#            L = L_f(C, c, c)
+#            M = np.kron(np.eye(N, dtype='int8'), L)
+#            M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(np.eye(N, dtype='int8'), L)
+#            Q1[k,:] = M.flatten('F')
+#            Q2[k,:] = M.flatten()
+#            k += 1
+#        for i in range(C-1):
+#            for j in range(i+1,C):
+#                L = L_f(C, i, j) + L_f(C, j, i)
+#                M = np.kron(K, L)
+#                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M) # proj @ np.kron(K, L)
+#                Q1[k,:] = M.flatten('F')
+#                Q2[k,:] = M.flatten()
+#                k += 1
+#        for i in range(C-1):
+#            for j in range(i+1,C):
+#                L = L_f(C, i, j) + L_f(C, j, i)
+#                M = np.kron(np.eye(N, dtype='int8'), L)
+#                M = M - X @ linalg.inv(X.T @ X) @ (X.T @ M)  # proj @ np.kron(np.eye(N, dtype='int8'), L)
+#                Q1[k,:] = M.flatten('F')
+#                Q2[k,:] = M.flatten()
+#                k += 1
+#        Q1 = da.from_zarr(Q1)
+#        Q2 = da.from_zarr(Q2)
+#
+#        QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+#        Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+#
+#        # theta
+#        theta = np.asarray( (linalg.inv(QTQ) @ Qt).compute() )
 
     return(theta)
 
@@ -530,8 +637,8 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
 
     return( res )
 
-def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
-        ) -> dict:
+def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
+        output_beta: bool=True) -> dict:
     N, C = Y.shape
     X = ctp.get_X(fixed_covars, N, C)
 
@@ -539,17 +646,26 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
     hom_g2, hom_e2 = theta[0], theta[1]
     V, W = np.diag(theta[2:(C+2)]), np.diag(theta[(C+2):(C*2+2)])
 
-    # GLS to get beta
-    Vy = cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
-    beta = util.glse( Vy, X, Y.flatten() )
-    # calcualte variance of fixed and random effects, and convert to dict
-    beta, fixed_vars = util.cal_variance(beta, P, fixed_covars, {}, {})[:2]
+    # ct specific effect variance
     ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
     ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
 
-    return( {'hom_g2':hom_g2, 'hom_e2':hom_e2, 'V':V, 'W':W, 'beta':beta, 'fixed_vars':fixed_vars, 
+    out = {'hom_g2':hom_g2, 'hom_e2':hom_e2, 'V':V, 'W':W, 
             'ct_overall_g_var':ct_overall_g_var, 'ct_specific_g_var':ct_specific_g_var, 
-            'ct_overall_e_var':ct_overall_e_var, 'ct_specific_e_var':ct_specific_e_var} )
+            'ct_overall_e_var':ct_overall_e_var, 'ct_specific_e_var':ct_specific_e_var}
+
+    # GLS to get beta
+    if output_beta:
+        Vy = cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
+        beta = util.glse( Vy, X, Y.flatten() )
+        # calcualte variance of fixed and random effects, and convert to dict
+        beta, fixed_vars = util.cal_variance(beta, P, fixed_covars, {}, {})[:2]
+        
+        out['beta'] = beta
+        out['fixed_vars'] = fixed_vars
+
+    return( out )
+
 
 def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
         ) -> Tuple[dict, dict]:
@@ -575,18 +691,19 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     X = ctp.get_X(fixed_covars, N, C)
     n_par = 2 + 2 * C + X.shape[1]
 
-    out = _free_he(Y, K, ctnu, P, fixed_covars)
+    out = _free_he(Y, K, ctnu, P, fixed_covars, output_beta=False)
     out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
     log.logger.info(out['nu'].dtype)
 
     # jackknife
     log.logger.info('Jackknife')
-    jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
+    #jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
+    jacks = {'V':[], 'W':[], 'VW':[]}
     for i in range(N):
         Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, P=P)
-        out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk )
+        out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk, output_beta=False )
 
-        jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
+        #jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
         jacks['V'].append( np.diag(out_jk['V']) )
         jacks['W'].append( np.diag(out_jk['W']) )
         jacks['VW'].append( np.append( np.diag(out_jk['V']), np.diag(out_jk['W']) ) )
@@ -594,13 +711,13 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
     var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
     var_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
-    var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
+    #var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
 
     p = {   'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
             'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), var_W, n=N, P=n_par),
             'VW': wald.mvwald_test( np.append(np.diag(out['V']),np.diag(out['W'])), np.zeros(2*C), 
                 var_VW, n=N, P=n_par),
-            'ct_beta': util.wald_ct_beta( out['beta']['ct_beta'], var_ct_beta, n=N, P=n_par )
+            #'ct_beta': util.wald_ct_beta( out['beta']['ct_beta'], var_ct_beta, n=N, P=n_par )
             }
     return(out, p)
 
