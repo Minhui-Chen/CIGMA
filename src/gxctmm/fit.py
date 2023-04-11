@@ -110,6 +110,8 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
         ct_overall_g_var, ct_specific_g_var = util.ct_random_var( V, P )
         ct_overall_e_var, ct_specific_e_var = util.ct_random_var( W, P )
     elif model == 'full':
+        hom_g2 = 0
+        hom_e2 = 0
         V = np.zeros((C,C))
         V[np.tril_indices(C)] = out['x'][:ngam]
         V = V + V.T
