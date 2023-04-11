@@ -127,7 +127,7 @@ def re_optim(out: object, opt: dict, fun: callable, par: list, args: tuple, meth
     for i in range(nrep):
         par_ = np.array(par) * rng.gamma(2,1/2,len(par))
         out_, opt_ = optim(fun, par_, args=args, method=method)
-        print( out_['fun'] )
+        log.logger.info( f"-loglike: {out_['fun']}" )
         if (not out['success']) and out_['success']:
             out, opt = out_, opt_
         elif (out['success'] == out_['success']) and (out['fun'] > out_['fun']):
@@ -562,6 +562,7 @@ def generate_tmpfn() -> str:
     tmpf = tempfile.NamedTemporaryFile(delete=False)
     tmpfn = tmpf.name
     tmpf.close()
+    log.logger.info(tmpfn)
     print(tmpfn)
     return tmpfn
 
