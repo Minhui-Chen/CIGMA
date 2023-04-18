@@ -838,6 +838,12 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
         pca = pca.loc[inds, pcs]
         return( pca )
     elif cat is not None:
-        return( pd.get_dummies( cat, drop_first=True, dtype='int8' ).loc[inds,:] )
+        return( pd.get_dummies( cat, drop_first=True ).loc[inds,:] )
     elif con is not None:
         return( con[inds] )
+
+def L_f(C, c1, c2):
+    # to build L matrix of 0 and 1
+    L = np.zeros((C,C), dtype='int8')
+    L[c1,c2] = 1
+    return( L )
