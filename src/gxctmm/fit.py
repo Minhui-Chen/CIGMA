@@ -153,7 +153,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
     N, C = Y.shape
     y = Y.flatten()
     # projection matrix
-    proj = np.eye(N * C, dtype='int8') - X @ linalg.inv(X.T @ X) @ X.T
+    proj = np.eye(N * C, dtype='int8') - X @ linalg.inv(X.T @ X) @ X.T # X: 1_N \otimes I_C append sex \otimes 1_C 
 
     # vec(M @ A @ M)^T @ vec(M @ B @ M) = vec(M @ A)^T @ vec((M @ B)^T)
     # when A, B, and M are symmetrix
@@ -169,7 +169,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
         return( L )
 
     if model == 'free':
-        if N * C < 5000:
+        if N * C < (1000 * 10):
             A = np.kron(K, np.ones((C,C), dtype='int8'))
             B = np.kron(np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8'))
             Q = [   A - X @ linalg.inv(X.T @ X) @ (X.T @ A), # proj @ np.kron(K, np.ones((C,C)))
@@ -244,6 +244,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
 
     elif model == 'full':
         if N * C < 5000:
+            log.logger.info('Normal mode')
             Q = []
             for c in range(C):
                 L = L_f(C, c, c)
@@ -271,11 +272,16 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
             Q2 = np.array([m.flatten() for m in Q])
 
             QTQ = Q1 @ Q2.T # np.array([m.flatten('F') for m in Q]) @ np.array([m.flatten() for m in Q]).T
+            #print( QTQ )
             Qt = Q1 @ t # np.array([m.flatten('F') for m in Q]) @ t
+            #print( Q1[:8,:10] )
+            print( t[:10] )
+            print( Qt )
 
             # theta
             theta = linalg.inv(QTQ) @ Qt
         else:
+            log.logger.info('Memmory saving mode')
             # use memmap (bus error when multiple programs run)
             tmpfn = util.generate_tmpfn()
             Q1_f = tmpfn+'.Q1'
@@ -669,7 +675,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
     return( out )
 
 
-def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
+def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}, jk: bool=True
         ) -> Tuple[dict, dict]:
     '''
     Fitting Free model with HE
@@ -680,6 +686,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         ctnu: cell type-specific noise variance (no header no index)
         P:    cell type proportions
         fixed_covars:   design matrices for Extra fixed effects
+        jk: perform jackknife
 
     Returns:
         a tuple of
@@ -698,29 +705,32 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     log.logger.info(out['nu'].dtype)
 
     # jackknife
-    log.logger.info('Jackknife')
-    #jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
-    jacks = {'V':[], 'W':[], 'VW':[]}
-    for i in range(N):
-        Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, P=P)
-        out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk, output_beta=False )
+    if jk:
+        log.logger.info('Jackknife')
+        #jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
+        jacks = {'V':[], 'W':[], 'VW':[]}
+        for i in range(N):
+            Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, P=P)
+            out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk, output_beta=False )
 
-        #jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
-        jacks['V'].append( np.diag(out_jk['V']) )
-        jacks['W'].append( np.diag(out_jk['W']) )
-        jacks['VW'].append( np.append( np.diag(out_jk['V']), np.diag(out_jk['W']) ) )
+            #jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
+            jacks['V'].append( np.diag(out_jk['V']) )
+            jacks['W'].append( np.diag(out_jk['W']) )
+            jacks['VW'].append( np.append( np.diag(out_jk['V']), np.diag(out_jk['W']) ) )
 
-    var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
-    var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
-    var_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
-    #var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
+        var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
+        var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
+        var_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
+        #var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
 
-    p = {   'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
-            'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), var_W, n=N, P=n_par),
-            'VW': wald.mvwald_test( np.append(np.diag(out['V']),np.diag(out['W'])), np.zeros(2*C), 
-                var_VW, n=N, P=n_par),
-            #'ct_beta': util.wald_ct_beta( out['beta']['ct_beta'], var_ct_beta, n=N, P=n_par )
-            }
+        p = {   'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
+                'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), var_W, n=N, P=n_par),
+                'VW': wald.mvwald_test( np.append(np.diag(out['V']),np.diag(out['W'])), np.zeros(2*C), 
+                    var_VW, n=N, P=n_par),
+                #'ct_beta': util.wald_ct_beta( out['beta']['ct_beta'], var_ct_beta, n=N, P=n_par )
+                }
+    else:
+        p = {}
     return(out, p)
 
 def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}
