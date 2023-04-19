@@ -37,8 +37,8 @@ def main():
 #                else:
 #                    wald_power[m][key].append(power_)
         # lrt
-        if 'lrt' in out['reml'].keys():
-            lrt = out['reml']['lrt'] # structure: lrt - two comparing model (e.g. full_free)
+        if 'lrt' in out.keys():
+            lrt = out['lrt'] # structure: lrt - two comparing model (e.g. full_free)
             for key, value in lrt.items():
                 power = np.sum(value < 0.05) / value.shape[0]
                 if key not in lrt_power.keys():
@@ -93,6 +93,10 @@ def main():
 
     a, b, c, d = 0, 0, 0, 0
     for x in lrt_power.keys():
+        # don't plot free vs hom
+        if x == 'free_hom':
+            continue
+
         if re.search('^hom', x):
             ax.plot(data['arg'], lrt_power[x], marker=markers[a], label=format_name(x), 
                     color=snakemake.params.mycolors[0])
@@ -112,11 +116,11 @@ def main():
             ax.plot(data['arg'], lrt_power[x], marker=markers[d], label=format_name(x), 
                     color=snakemake.params.mycolors[3])
             d += 1
-    ax.legend()
-    ax.set_title('LRT')
+    #ax.legend()
+    ax.set_title('REML')
     if snakemake.wildcards.model == 'free':
         ax.set_ylabel('True positive rate', fontsize=16)
-    elif snakemake.wildcards.model == 'hom':
+    else:
         ax.set_ylabel('False positive rate', fontsize=16)
 
     ax.set_ylim((0-0.02,1+0.02))
