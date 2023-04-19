@@ -618,7 +618,7 @@ rule yazar_HE_split:
             ctp[batch].to_csv(ctp_f, sep='\t')
             ctnu[batch].to_csv(ctnu_f, sep='\t')
 
-rule yazar_HE:
+rule yazar_HE_full:
     input:
         ctp = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
         ctnu = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
@@ -628,28 +628,27 @@ rule yazar_HE:
         geno_pca = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
         meta = 'data/Yazar2022Science/meta.txt',
     output:
-        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.batch{{i}}',
+        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.batch{{i}}',
     params:
-        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/rep/he.npy',
+        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/rep/he.full.npy',
         snps = 5, # threshold of snp number per gene
     resources:
         time = '10:00:00',
         mem_mb = '30G',
-        burden = 600,
-    script: 'bin/yazar/he.py'
+    script: 'bin/yazar/he.full.py'
 
-rule yazar_HE_merge:
+rule yazar_HE_full_merge:
     input:
-        out = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.batch{i}'
+        out = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.batch{i}'
             for i in range(5)],
     output:
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.npy',
+        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.npy',
     script: 'bin/mergeBatches.py'
 
 rule yazar_HE_Full_plot:
     input:
         P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.npy',
+        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.npy',
     output:
         cov = f'results/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.cov.png',
         h2 = f'results/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.h2.png',
@@ -684,6 +683,7 @@ rule yazar_HE_free_merge:
     script: 'bin/mergeBatches.py'
 
 rule yazar_HE_Free_plot:
+    # the script is for Full model
     input:
         P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
         out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.free.npy',
@@ -693,7 +693,7 @@ rule yazar_HE_Free_plot:
 
 rule yazar_HE_clean:
     input:
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.npy',
+        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.npy',
         kinship = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
     output:
         touch(f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.done')
