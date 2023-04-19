@@ -29,19 +29,25 @@ def main():
 
         N, C = Y.shape
 
-        # fit hom
-        hom = fit.hom_REML(Y, K, P, ctnu)
-        # fit freeW
-        freeW = fit.freeW_REML(Y, K, P, ctnu)
-        # fit free
-        free, free_p = fit.free_REML(Y, K, P, ctnu, jk=False)
+        if snakemake.wildcards.model != 'full':
+            # fit hom
+            hom = fit.hom_REML(Y, K, P, ctnu, method='BFGS-Nelder')
+            # fit freeW
+            freeW = fit.freeW_REML(Y, K, P, ctnu, method='BFGS-Nelder')
+            # fit free
+            free, free_p = fit.free_REML(Y, K, P, ctnu, method='BFGS-Nelder', jk=False)
 
-        # LRT
-        free_freeW = util.lrt(free['opt']['l'], freeW['opt']['l'], k=C)
-        free_hom = util.lrt(free['opt']['l'], hom['opt']['l'], k=2*C)
+            # LRT
+            free_freeW = util.lrt(free['opt']['l'], freeW['opt']['l'], k=C)
+            free_hom = util.lrt(free['opt']['l'], hom['opt']['l'], k=2*C)
 
-        out = { 'hom': hom, 'free':free, 'wald':free_p,
-                'lrt': {'free_freeW':free_freeW, 'free_hom':free_hom}   }
+            out = { 'hom': hom, 'free':freeW, 'free':free, 'wald':free_p,
+                    'lrt': {'free_freeW':free_freeW, 'free_hom':free_hom}   }
+        else:
+            # fit full
+            full = fit.full_REML(Y, K, P, ctnu, method='BFGS-Nelder', nrep=2)
+
+            out = { 'full':full }
 
         os.makedirs( os.path.dirname(out_fs[i]), exist_ok=True )
         np.save( out_fs[i], out )

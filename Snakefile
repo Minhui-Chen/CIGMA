@@ -143,23 +143,6 @@ rule sim_HE:
     priority: 1
     script: 'bin/sim/he.py'
 
-rule sim_HE_tmp:
-    input:
-        Y = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/Y.batch{{i}}.txt',
-        K = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/K.batch{{i}}.txt',
-        ctnu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
-        P = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/P.batch{{i}}.txt',
-    output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{{i}}.tmp',
-    params:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/rep/he.tmp.npy',
-        batches = lambda wildcards: sim_batches[int(wildcards.i)],
-    resources:
-        time = '10:00:00',
-        mem_mb = lambda wildcards: f'{max(1,int(float(wildcards.ss))//150)}G',
-    priority: 1
-    script: 'bin/sim/he.tmp.py'
-
 rule sim_REML:
     input:
         Y = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/Y.batch{{i}}.txt',
