@@ -158,8 +158,8 @@ def _pMp(X:np.ndarray, X_inv: np.ndarray, A:np.ndarray, B:np.ndarray) -> np.ndar
     Compute proj @ np.kron(A,B) @ proj
     '''
     M = np.kron(A,B)
-    XM = X @ X_inv @ (X.T @ M)
-    M = M - XM - XM.T + X @ X_inv @ (X.T @ M @ X) @ X_inv @ X.T
+    p_M = M - X @ X_inv @ (X.T @ M)
+    M = p_M - p_M @ X @ X_inv @ X.T
     return( M )
 
 @profile
