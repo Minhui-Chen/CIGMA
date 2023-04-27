@@ -1,40 +1,62 @@
-def sim_agg_truebeta_subspace(wildcards):
+def sim_agg_he_truebeta_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('analysis/sim/{{model}}/{params}/celltypebeta.txt', params=subspace.instance_patterns)
 
-def sim_agg_trueV_subspace(wildcards):
+def sim_agg_he_trueV_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('analysis/sim/{{model}}/{params}/V.txt', params=subspace.instance_patterns)
 
-def sim_agg_trueW_subspace(wildcards):
+def sim_agg_he_trueW_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/W.txt', params=subspace.instance_patterns)
+
+def sim_agg_reml_truebeta_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    return expand('analysis/sim/{{model}}/{params}/celltypebeta.txt', params=subspace.instance_patterns)
+
+def sim_agg_reml_trueV_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    return expand('analysis/sim/{{model}}/{params}/V.txt', params=subspace.instance_patterns)
+
+def sim_agg_reml_trueW_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
     return expand('analysis/sim/{{model}}/{params}/W.txt', params=subspace.instance_patterns)
 
 def sim_agg_out_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('analysis/sim/{{model}}/{params}/out.npy', params=subspace.instance_patterns)
 
+def sim_agg_he_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/out.he.npy', params=subspace.instance_patterns)
+
+def sim_agg_reml_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    return expand('analysis/sim/{{model}}/{params}/out.reml.npy', params=subspace.instance_patterns)
+
 rule sim_HEestimates_subspace_plot:
     input:
-        out = sim_agg_out_subspace,
-        V = sim_agg_trueV_subspace,
-        W = sim_agg_trueW_subspace,
+        out = sim_agg_he_out_subspace,
+        V = sim_agg_he_trueV_subspace,
+        W = sim_agg_he_trueW_subspace,
     output:
         png = 'results/sim/{model}/HE.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
                 sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
         sim_plot_order = sim_plot_order,
+        method = None,
         mycolors = mycolors,
         pointcolor = pointcolor,
         colorpalette = colorpalette,
-    script: 'scripts/sim/HEestimates_subspace_plot.py'
+    script: 'scripts/sim/estimates_subspace_plot.py'
 
 rule sim_HEwald_subspace_plot:
     input:
-        out = sim_agg_out_subspace,
+        out = sim_agg_he_out_subspace,
     output:
-        png = 'results/sim/{model}/HE.wald.AGG{arg}.png',                                                                 params:
+        png = 'results/sim/{model}/HE.wald.AGG{arg}.png',
+    params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
                 sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
         sim_plot_order = sim_plot_order,
@@ -43,27 +65,30 @@ rule sim_HEwald_subspace_plot:
 
 rule sim_REMLestimates_subspace_plot:
     input:
-        out = sim_agg_out_subspace,                                                                                           beta = sim_agg_truebeta_subspace,                                                                                     V = sim_agg_trueV_subspace,
-        W = sim_agg_trueW_subspace,
+        out = sim_agg_reml_out_subspace,
+        beta = sim_agg_reml_truebeta_subspace, 
+        V = sim_agg_reml_trueV_subspace,
+        W = sim_agg_reml_trueW_subspace,
     output:
         png = 'results/sim/{model}/REML.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
-                sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
+                sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)]).iloc[:,:],
         sim_plot_order = sim_plot_order,
+        method = None,
         colorpalette = colorpalette,
         pointcolor = pointcolor,
         mycolors = mycolors,
-    script: 'scripts/sim/REMLestimates_subspace_plot.py'
+    script: 'scripts/sim/estimates_subspace_plot.py'
 
 rule sim_REMLwaldNlrt_subspace_plot:
     input:
-        out = sim_agg_out_subspace,
+        out = sim_agg_reml_out_subspace,
     output:
         png = 'results/sim/{model}/REML.waldNlrt.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
-                sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
+                sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)]).iloc[:,:],
         sim_plot_order = sim_plot_order,
         mycolors = mycolors,
     script: 'scripts/sim/REMLwaldNlrt_subspace_plot.py'
@@ -72,7 +97,7 @@ rule sim_collect_HEnREML_subspace_plot:
     input:
         he = 'results/sim/{model}/HE.AGG{arg}.png',
         he_wald = 'results/sim/{model}/HE.wald.AGG{arg}.png',
-        reml = 'results/sim/{model}/REML.AGG{arg}.png', # reml is too time-consuming, so not included for now
+        reml = 'results/sim/{model}/REML.AGG{arg}.png', 
         reml_waldNlrt = 'results/sim/{model}/REML.waldNlrt.AGG{arg}.png',
     output:
         flag = touch('staging/sim/{model}/HEnREML.AGG{arg}.flag'),
@@ -89,5 +114,126 @@ rule sim_AGGarg:
 
 rule sim_all:
     input:
-        flag = expand('staging/sim/{model}/all.flag', model=['free']),
+        flag = expand('staging/sim/{model}/all.flag', model=['free','freeW','full']),
+
+########################################################################
+# Real data
+########################################################################
+rule gene_annotation_comparison:
+    input:
+        v24 = 'data/gencode.v24lift37.annotation.gff3.gz',
+        v43 = 'data/gencode.v43lift37.annotation.gff3.gz',
+        v82 = 'data/Homo_sapiens.GRCh37.82.gff3.gz',
+        v85 = 'data/Homo_sapiens.GRCh37.85.gff3.gz',
+        genes = 'data/Yazar2022Science/genes.txt',
+    output:
+        results = 'data/gene.annotation.txt',
+    run:
+        import gzip, re
+        def read_gencode(f):
+            res = {}
+            for line in gzip.open(f, 'rt'):
+                if line[0] != '#':
+                    line = line.strip().split()
+                    if line[2] == 'gene' and re.search('chr',line[0]) and line[0][3:].isdigit():
+                        try:
+                            chr, start, end, info = int(line[0][3:]), int(line[3]), int(line[4]), line[-1]
+                            info = info.split(';')
+                            gene = info[0].split('.')[0][3:]
+                            res[gene] = {'chr':chr, 'start':start, 'end':end}
+                        except:
+                            print(line)
+                            sys.exit()
+            return( res )
+
+        def read_ensembl(f):
+            res = {}
+            chrs = []
+            for line in gzip.open(f, 'rt'):
+                if line[0] != '#':
+                    line = line.strip().split('\t')
+                    if 'ID=gene' in line[-1] and line[0].isdigit():
+                        try:
+                            chr, start, end, info = int(line[0]), int(line[3]), int(line[4]), line[-1]
+                            info = info.split(';')
+                            gene = info[0].split(':')[1]
+                            res[gene] = {'chr':chr, 'start':start, 'end':end}
+                            chrs.append( chr )
+                        except:
+                            print(line)
+                            sys.exit()
+            print( np.unique( chrs, return_counts=True) )
+            return( res )
+
+        def compare_genes(v1, v2):
+            v1_v2 = set(v1.keys()) & set(v2.keys())
+            match = []
+            close = []
+            for gene in v1_v2:
+                v1_gene, v2_gene = v1[gene], v2[gene]
+                if v1_gene['chr'] == v2_gene['chr'] and v1_gene['start'] == v2_gene['start'] and v1_gene['end'] == v2_gene['end']:
+                    match.append(gene)
+                elif v1_gene['chr'] == v2_gene['chr'] and abs(v1_gene['start'] - v2_gene['start']) < 1000 and abs(v1_gene['end'] - v2_gene['end']) < 1000:
+                    close.append(gene)
+            return( len(v1_v2), len(match), len(close) )
+
+        v24 = read_gencode(input.v24)
+        v43 = read_gencode(input.v43)
+        v82 = read_ensembl(input.v82)
+        v85 = read_ensembl(input.v85)
+
+        genes = pd.read_table(input.genes)['feature'].tolist()
+        with open(output.results, 'w') as f:
+            f.write(f'{len(v24.keys())}, {len(v43.keys())}, {len(v85.keys())},  and {len(v82.keys())} genes in v24, v43, v85, and v82.\n')
+            f.write(f'{len(set(v24.keys()) & set(genes))} v24 genes in data.\n')
+            f.write(f'{len(set(v43.keys()) & set(genes))} v43 genes in data.\n')
+            f.write(f'{len(set(v82.keys()) & set(genes))} v82 genes in data.\n')
+            f.write(f'{len(set(v85.keys()) & set(genes))} v85 genes in data.\n')
+            f.write('%i genes overlap between v24 and v43. %i match, and %i close.\n'%(compare_genes(v24,v43)))
+            f.write('%i genes overlap between v24 and v82. %i match, and %i close.\n'%(compare_genes(v24,v82)))
+            f.write('%i genes overlap between v43 and v82. %i match, and %i close.\n'%(compare_genes(v43,v82)))
+            f.write('%i genes overlap between v43 and v85. %i match, and %i close.\n'%(compare_genes(v43,v85)))
+
+########################################################################
+# Yazar 2022 Science
+########################################################################
+# data check
+rule yazar_cell_dist:
+    input:
+        meta = 'data/Yazar2022Science/meta.txt',
+    output:
+        png = 'results/Yazar2022Science/cell.dist.png',
+    params:
+        ind_col = yazar_ind_col,
+        ct_col = yazar_ct_col,
+    script: 'scripts/yazar/cell_dist.py'
+
+rule yazar_impute_ctp_s1:
+    input:
+        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.gz',
+    output:
+        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.b_imputed.gz',
+    resources:
+        mem_mb = '10G',
+        time = '36:00:00',
+    run:
+        from ctmm import preprocess
+        data = pd.read_table(input.data, index_col=(0,1)).astype('float32')
+        #data = preprocess.softimpute(data, seed=params.seed)
+        data = data.unstack()
+        data.to_csv(output.data, sep='\t', index=False, header=False)
+
+rule yazar_impute_ctp_s2:
+    # softimpute is too slow for the whold transcriptome
+    input:
+        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.b_imputed.gz',
+    output:
+        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.a_imputed.gz',
+    params:
+        seed = 1234567,
+    resources:
+        mem_mb = '40G',
+        time = '36:00:00',
+    script: 'bin/yazar/impute.R'
+
 

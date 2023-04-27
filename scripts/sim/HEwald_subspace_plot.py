@@ -12,6 +12,9 @@ def main():
     wildcards = snakemake.wildcards 
     sim_plot_order = snakemake.params.sim_plot_order 
     mycolors = snakemake.params.mycolors 
+    if snakemake.wildcards.model == 'full':
+        os.system(f'touch {snakemake.output.png}')
+        sys.exit()
 
     # select and order data
     data = pd.DataFrame({'arg':np.array(subspace[wildcards.arg]), 'out':snakemake.input.out})
@@ -30,7 +33,7 @@ def main():
     for f in data['out']:
         out = np.load(f, allow_pickle=True).item()
         # wald
-        he = out['he']['wald'] # structure: he_p - model (e.g. hom_p) - statistics (e.g. hom2, V)
+        he = out['wald'] # structure: he_p - model (e.g. hom_p) - statistics (e.g. hom2, V)
         for m in ['free']:
             he_m = he[m]
             if m not in he_power.keys():
@@ -71,8 +74,8 @@ def main():
     #ax.plot(data['arg'], he_power['free']['sigma_g2'], marker=markers[0], label='$\sigma_{g}^2$')
     #ax.plot(data['arg'], he_power['free']['sigma_e2'], marker=markers[0], label='$\sigma_{e}^2$')
     ax.plot(data['arg'], he_power['free']['V'], marker=markers[0], label='$V$')
-    ax.plot(data['arg'], he_power['free']['W'], marker=markers[0], label='$W$')
-    ax.plot(data['arg'], he_power['free']['VW'], marker=markers[0], label='$(V, W)$')
+    #ax.plot(data['arg'], he_power['free']['W'], marker=markers[0], label='$W$')
+    #ax.plot(data['arg'], he_power['free']['VW'], marker=markers[0], label='$(V, W)$')
     #for i in range(len(he_power['free']['Vi'])):
     #    axes[2].plot(data['arg'], he_power['free']['Vi'][i], marker='.', label=f'$V_{i+1}$', ls='--',
     #            color=mycolors[3+i], alpha=0.5)
@@ -81,11 +84,11 @@ def main():
     #            color=mycolors[3+i], alpha=0.5)
 
     #axes[2].set_title('Free')
-    if wildcards.model == 'hom':
-        ax.set_ylabel('False positive rate', fontsize=16)
-    else:
+    if wildcards.model == 'free':
         ax.set_ylabel('True positive rate', fontsize=16)
-    ax.legend()
+    else:
+        ax.set_ylabel('False positive rate', fontsize=16)
+    #ax.legend()
 
     ax.set_ylim((0-0.02,1+0.02))
     ax.axhline(y=0.05, color='0.6', ls='--', zorder=0)

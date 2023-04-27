@@ -197,7 +197,8 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
     # proj @ y @ y^T @ proj - proj @ D @ proj
     y_p = proj @ y
     ctnu_p = proj * ctnu.flatten()
-    t = np.outer( y_p, y_p ) - ctnu_p + ctnu_p @ X @ X_inv @ X.T
+    pDp = D - ctnu_p - ctnu_p.T + X @ (X_inv @ ((X^T * ctnu.flatten()) @ X) @ X_inv) @ X.T
+    t = np.outer( y_p, y_p ) - pDp
     t = t.flatten()
 
     # build Q: list of coefficients

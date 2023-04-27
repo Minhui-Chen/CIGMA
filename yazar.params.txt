@@ -1,0 +1,4 @@
+# ind_min_cellnum:  exclude individuals <= number of cells
+# ct_min_cellnum: For cts <= ct_min_cellnum, set nu and y to missing
+ind_min_cellnum	ct_min_cellnum	sex	PC	experiment	disease
+100	10	Y	6	R	Y
