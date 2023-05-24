@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, re
 import numpy as np, pandas as pd
 from gxctmm import util
 
@@ -24,11 +24,13 @@ def main():
         f.write('gene\tK\tsnps\n')
     
         # make kinship for each gene
-        bim = pd.read_csv(chr_prefix+'.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp','a1','a2'])
         for _, row in genes.loc[genes['chr']==chr].iterrows():
             gene, start, end = row['feature'], row['start'], row['end']
             kinship_prefix = os.path.join(os.path.dirname(kinship_tmp),gene)
-            nsnp = util.grm(chr_prefix, chr, start, end, r, kinship_prefix)
+            if re.search('rel.bin$', kinship_tmp):
+                nsnp = util.grm(chr_prefix, chr, start, end, r, kinship_prefix, 'plink')
+            elif re.search('grm.bin$', kinship_tmp):
+                nsnp = util.grm(chr_prefix, chr, start, end, r, kinship_prefix, 'gcta')
             f.write(f'{gene}\t{kinship_prefix}.rel.bin\t{nsnp}\n')
 
     os.remove(chr_prefix+'.bed')

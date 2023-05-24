@@ -785,40 +785,51 @@ def update_bim_snpname(bim_fn: str) -> None:
     bim['snp'] = bim['chr'].astype('str')+'_'+bim['pos'].astype('str')+'_'+bim['a2']+'_'+bim['a1']
     bim.to_csv(bim_fn, sep='\t', index=False, header=False)
 
-def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str) -> int:
-    '''
+def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str='plink') -> int:
+    """
     Compute kinship matrix for a genomic region (start-r, end+r)
 
     Parameters:
         bfile:  prefix for chr/genome bed/bim files
         chr:    chromosome
         start:  start position of gene
-        end:    end position of gene 
+        end:    end position of gene
         r:  radius to the gene
-        rel:    prefix for relationship matrix file (prefix.rel.bin)
+        rel:    prefix for relationship matrix file (prefix.rel.bin for plink, prefix.grm.bin for gcta)
+        tool:   plink or gcta to compute grm
     Returns:
         number of snps in the regions
-    '''
+    """
     start = max(0, start - r)
     end = end + r
 
     # check number of SNPs in the region
     bim = pd.read_csv(bfile+'.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp','a1','a2'])
     nsnp = bim.loc[(bim['chr']==chr) & (bim['bp'] > start) & (bim['bp'] < end)].shape[0]
-    
+
     # compute kinship matrix
     if nsnp > 0:
-        cmd = ['plink', '--bfile', bfile, 
-                '--chr', chr, '--from-bp', start, '--to-bp', end,
-                '--make-rel', 'bin',
-                '--out', rel]
-        subprocess_popen( cmd )
+        if tool == 'plink':
+            cmd = ['plink', '--bfile', bfile,
+                   '--chr', chr, '--from-bp', start, '--to-bp', end,
+                   '--make-rel', 'bin',
+                   '--out', rel]
+            subprocess_popen( cmd )
+        elif tool == 'gcta':
+            tmp = generate_tmpfn()
+            cmd = ['plink', '--bfile', bfile,
+                   '--chr', chr, '--from-bp', start, '--to-bp', end,
+                    '--make-bed', '--out', tmp]
+            subprocess_popen( cmd )
+            cmd = ['gcta', '--bfile', tmp,
+                   '--make-grm', '--out', rel]
+            subprocess_popen( cmd )
 
-    return( nsnp )
+    return nsnp
 
 def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Series=None, 
         con: pd.Series=None) -> dict:
-    '''
+    """
     Construct design matrix
 
     Parameters:
@@ -826,11 +837,11 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
         pca:    dataframe of pcs, with index: individuals (sort not required) and columns (PC1-PCx)
         PC: number to PC to adjust
         cat:    series of category elements e.g. sex: male and female
-        con:    series of continuious elements e.g. age
+        con:    series of continuous elements e.g. age
 
     Returns:
         a design matrix
-    '''
+    """
 
     # pca
     if pca is not None:
