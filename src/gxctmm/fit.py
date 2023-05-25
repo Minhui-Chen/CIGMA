@@ -11,7 +11,7 @@ from . import log, util
 
 def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, K: np.ndarray, ctnu: np.ndarray
         ) -> np.ndarray:
-    '''
+    """
     Compute covariance matrix of vectorized Cell Type-specific Pseudobulk
 
     Parameters:
@@ -24,7 +24,7 @@ def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, K: np.nda
 
     Returns:
         covariance matrix of vectorized Cell Type-specific Pseudobulk V(y)
-    '''
+    """
 
     N, C = ctnu.shape
     A = hom_g2 * np.ones((C,C), dtype='int8') + V
@@ -35,7 +35,7 @@ def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, K: np.nda
 
 def LL(y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, hom_g2: float, hom_e2: float, V: np.ndarray, 
         W: np.ndarray) -> float:
-    '''
+    """
     Loglikelihood function
 
     Parameters:
@@ -49,7 +49,7 @@ def LL(y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, hom_g2: fl
         W:  covariance matrix of cell type-specific env effect
     Returns:
         loglikelihood
-    '''
+    """
 
     N, C = ctnu.shape
     Vy = cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
@@ -73,7 +73,7 @@ def LL(y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, hom_g2: fl
 
 def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray, 
         fixed_covars: dict ) -> dict:
-    '''
+    """
     Extract REML optimization resutls
 
     Parameters:
@@ -86,7 +86,7 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
         fixed_covars:   design matrices for extra fixed effects
     Returns:
         a dict of model parameters and statitics
-    '''
+    """
 
     N, C = Y.shape
     ngam = C*(C+1) // 2
@@ -134,9 +134,9 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
                 'fixed_vars':fixed_vars } )
 
 def _he_Qloop_full(Q: list, X: np.ndarray, t:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    '''
-    Compute QTQ and Qt 
-    '''
+    """
+    Compute QTQ and Qt
+    """
     QTQ = []
     Qt = []
     X_p = X @ linalg.inv(X.T @ X)
@@ -154,18 +154,18 @@ def _he_Qloop_full(Q: list, X: np.ndarray, t:np.ndarray) -> Tuple[np.ndarray, np
     return( np.array(QTQ), np.array(Qt) )
 
 def _pMp(X:np.ndarray, X_inv: np.ndarray, A:np.ndarray, B:np.ndarray) -> np.ndarray:
-    '''
+    """
     Compute proj @ np.kron(A,B) @ proj
-    '''
+    """
     M = np.kron(A,B)
     p_M = M - X @ X_inv @ (X.T @ M)
     M = p_M - p_M @ X @ X_inv @ X.T
     return( M )
 
 @profile
-def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model: str,
-        dtype:str = None) -> np.ndarray:
-    '''
+def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
+           model: str, random_covars: dict={}, dtype:str = None) -> np.ndarray:
+    """
     Perform OLS in HE
 
     Parameters:
@@ -174,12 +174,12 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
         X:  design matrix for fixed effects
         ctnu: cell type-specific noise variance
         model:  free / full
-        dtype:  data type e.g. float32
+        dtype:  data type e.g. float32 to save memory
     Returns:
-        a tuple of 
-            #. 
+        a tuple of
             #.
-    '''
+            #.
+    """
     if dtype is None:
         dtype = 'float64'
     else:
@@ -188,6 +188,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
     N, C = Y.shape
     y = Y.flatten()
     X_inv = linalg.inv(X.T @ X)
+    n_random = len(random_covars.keys())
 
     # projection matrix
     proj = np.eye(N * C, dtype='int8') - X @ X_inv @ X.T # X: 1_N \otimes I_C append sex \otimes 1_C 
@@ -202,53 +203,37 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
 
     # build Q: list of coefficients
     if model == 'free':
+        Q_shape = (2*(C+1)+n_random, (N*C)**2)
         if N * C < (10000 * 100):
-            Q = np.empty((2*(C+1), (N*C)**2), dtype=dtype)
+            Q = np.empty(Q_shape, dtype=dtype)
         else:
             # use memmap (don't run in parallel)
             tmpfn = util.generate_tmpfn()
-            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=(2*(C+1), (N*C)**2))
+            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
 
-        log.logger.info('I')
         Q[0] = _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')).flatten('F') # proj @ np.kron(K, J_C) @ proj
         Q[1] = _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')).flatten('F') # I_N \ot J_C
         
         k = 2
-        log.logger.info('I')
         for c in range(C):
             L = util.L_f(C, c, c)
             Q[k] = _pMp(X, X_inv, K, L).flatten('F')
             k += 1
-        log.logger.info('I')
         for c in range(C):
             L = util.L_f(C, c, c)
             Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
             k += 1
-        log.logger.info('I')
-        Q = Q.T
-        if isinstance(Q, np.memmap):
-            Q.flush()
-
-        log.logger.debug('OLSing')
-        QTQ = Q.T @ Q
-        Qt = Q.T @ t
-
-        # theta
-        theta = linalg.inv(QTQ) @ Qt
-
-        if isinstance(Q, np.memmap):
-            del Q
-            os.remove(tmpfn)
 
     elif model == 'full':
+        Q_shape = (C*(C+1)+n_random, (N*C)**2)
         if N * C < 5000000:
             log.logger.info('Normal mode')
-            Q = np.empty((C*(C+1), (N*C)**2), dtype=dtype)
+            Q = np.empty(Q_shape, dtype=dtype)
         else:
             log.logger.info('Memmory saving mode')
             # use memmap (don't run in parallel)
             tmpfn = util.generate_tmpfn()
-            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=(C*(C+1), (N*C)**2))
+            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
 
         k = 0
         for c in range(C):
@@ -269,26 +254,31 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, model:
                 L = util.L_f(C, i, j) + util.L_f(C, j, i)
                 Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F') 
                 k += 1
-        Q = Q.T
-        if isinstance(Q, np.memmap):
-            Q.flush()
 
-        log.logger.debug('OLSing')
-        QTQ = Q.T @ Q
-        Qt = Q.T @ t
+    for key in sorted(random_covars.keys()):
+        Z = random_covars[key]
+        Q[k] = _pMp(X, X_inv, Z @ Z.T, np.ones((C,C), dtype='int8')).flatten('F')
+        k += 1
 
-        # theta
-        theta = linalg.inv(QTQ) @ Qt
+    Q = Q.T
+    if isinstance(Q, np.memmap):
+        Q.flush()
 
-        if isinstance(Q, np.memmap):
-            del Q
-            os.remove(tmpfn)
+    QTQ = Q.T @ Q
+    Qt = Q.T @ t
+
+    # theta
+    theta = linalg.inv(QTQ) @ Qt
+
+    if isinstance(Q, np.memmap):
+        del Q
+        os.remove(tmpfn)
 
     return(theta)
 
 def _reml(loglike_fun: callable, par: list, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarray, 
         ctnu: np.ndarray, fixed_covars: dict, method: str, nrep: int) -> dict:
-    '''
+    """
     Wrapper for running REML
 
     Parameters:
@@ -304,7 +294,7 @@ def _reml(loglike_fun: callable, par: list, model: str, Y: np.ndarray, K: np.nda
         nrep:   number of optimization repeats when initial optimization failed
     Returns:
         a dict of model parameters and statistics
-    '''
+    """
 
     N, C = Y.shape
     y = Y.flatten()
@@ -550,12 +540,12 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
     return( res )
 
 def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
-        output_beta: bool=True, dtype:str = None) -> dict:
+        random_covars: dict={}, output_beta: bool=True, dtype:str = None) -> dict:
     N, C = Y.shape
     X = ctp.get_X(fixed_covars, N, C)
 
-    theta = he_ols(Y, K, X, ctnu, 'free', dtype=dtype)
-    hom_g2, hom_e2 = theta[0], theta[1]
+    theta = he_ols(Y, K, X, ctnu, 'free', random_covars, dtype=dtype)
+hom_g2, hom_e2 = theta[0], theta[1]
     V, W = np.diag(theta[2:(C+2)]), np.diag(theta[(C+2):(C*2+2)])
 
     # ct specific effect variance
@@ -580,32 +570,34 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
 
 
 def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}, 
-        jk: bool=True, dtype: str=None) -> Tuple[dict, dict]:
-    '''
+        random_covars: dict={}, jk: bool=True, dtype: str=None) -> Tuple[dict, dict]:
+    """
     Fitting Free model with HE
 
     Parameters:
         Y:    cell type-specific pseudobulk (no header no index)
-        K:    kinship matrix 
+        K:    kinship matrix
         ctnu: cell type-specific noise variance (no header no index)
         P:    cell type proportions
         fixed_covars:   design matrices for Extra fixed effects
+        random_covars:  design matrices for Extra random covars
         jk: perform jackknife
         dtype:  data type for he_ols, e.g. float32
 
     Returns:
         a tuple of
             #.  dictionary of parameter estimates
-            #.  dictionary of p values 
-    '''
+            #.  dictionary of p values
+    """
 
     log.logger.info('Fitting Free model with HE')
 
     N, C = Y.shape 
     X = ctp.get_X(fixed_covars, N, C)
-    n_par = 2 + 2 * C + X.shape[1]
+    n_random = len(random_covars.keys())
+    n_par = 2 + 2 * C + X.shape[1] + n_random
 
-    out = _free_he(Y, K, ctnu, P, fixed_covars, output_beta=False, dtype=dtype)
+    out = _free_he(Y, K, ctnu, P, fixed_covars, random_covars=random_covars, output_beta=False, dtype=dtype)
     out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
     log.logger.info(out['nu'].dtype)
 
@@ -615,8 +607,8 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         #jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
         jacks = {'V':[], 'W':[], 'VW':[]}
         for i in range(N):
-            Y_jk, K_jk, ctnu_jk, fixed_covars_jk, _, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, P=P)
-            out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk, output_beta=False, dtype=dtype )
+            Y_jk, K_jk, ctnu_jk, fixed_covars_jk, random_covars_jk, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, random_covars, P=P)
+            out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk, random_covars_jk, output_beta=False, dtype=dtype )
 
             #jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
             jacks['V'].append( np.diag(out_jk['V']) )
@@ -639,7 +631,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     return(out, p)
 
 def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
-        dtype:str=None) -> dict:
+        random_covars: dict={}, dtype:str=None) -> dict:
     '''
     Fitting Full model with HE
 
@@ -649,6 +641,7 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         ctnu: cell type-specific noise variance (no header no index)
         P:    cell type proportions
         fixed_covars:   design matrices for Extra fixed effects
+        random_covars:  design matrices for Extra random covars
         dtype:  data type for computation in he_ols, e.g. float32
 
     Returns:
@@ -661,7 +654,7 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     ntril = (C-1) * C // 2
     X = ctp.get_X(fixed_covars, N, C)
 
-    theta = he_ols(Y, K, X, ctnu, 'full', dtype=dtype)
+    theta = he_ols(Y, K, X, ctnu, 'full', random_covars=random_covars, dtype=dtype)
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
     V[np.triu_indices(C,k=1)] = theta[(C*2):(C*2 + ntril)]
     V = V + V.T - np.diag(theta[:C])
