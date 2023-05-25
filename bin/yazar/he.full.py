@@ -28,7 +28,7 @@ def main():
     # collect covariates
     op_pca = pd.read_table(snakemake.input.op_pca, index_col=0)
     geno_pca = pd.read_table(snakemake.input.geno_pca, index_col=0).drop('IID',axis=1)
-    meta = pd.read_table(snakemake.input.meta, usecols=['individual', 'sex', 'age'])
+    meta = pd.read_table(snakemake.input.obs, usecols=['individual', 'sex', 'age'])
     meta = meta.drop_duplicates()
     meta = meta.set_index('individual')
     fixed_covars = {'op_pca': util.design(inds, pca=op_pca, PC=1).to_numpy().astype('float32'),
