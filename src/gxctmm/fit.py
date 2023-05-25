@@ -199,82 +199,120 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
     y_p = proj @ y
     ctnu_p = proj * ctnu.flatten()
     t = np.outer( y_p, y_p ) - ctnu_p + ctnu_p @ X @ X_inv @ X.T
-    t = t.flatten()
 
     # build Q: list of coefficients
     if model == 'free':
-        Q_shape = (2*(C+1)+n_random, (N*C)**2)
         if N * C < (10000 * 100):
-            Q = np.empty(Q_shape, dtype=dtype)
-        else:
-            # use memmap (don't run in parallel)
-            tmpfn = util.generate_tmpfn()
-            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
-
-        Q[0] = _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')).flatten('F') # proj @ np.kron(K, J_C) @ proj
-        Q[1] = _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')).flatten('F') # I_N \ot J_C
-        
-        k = 2
-        for c in range(C):
-            L = util.L_f(C, c, c)
-            Q[k] = _pMp(X, X_inv, K, L).flatten('F')
-            k += 1
-        for c in range(C):
-            L = util.L_f(C, c, c)
-            Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
-            k += 1
-
-    elif model == 'full':
-        Q_shape = (C*(C+1)+n_random, (N*C)**2)
-        if N * C < 5000000:
-            log.logger.info('Normal mode')
-            Q = np.empty(Q_shape, dtype=dtype)
+            Q = []
+            Q.append( _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')) )
+            Q.append( _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')) )
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q.append( _pMp(X, X_inv, K, L) )
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q.append( _pMp(X, X_inv, np.eye(N, dtype='int8'), L) )
+            for key in sorted(random_covars.keys()):
+                Z = random_covars[key]
+                Q.append( _pMp(X, X_inv, Z @ Z.T, np.ones((C, C), dtype='int8')) )
+            QTQ = np.tensordot(Q, Q, axes=([1, 2], [1, 2]))
+            QTt = np.tensordot(Q, t, axes=([1, 2], [0, 1]))
         else:
             log.logger.info('Memmory saving mode')
+            Q_shape = (2 * (C + 1) + n_random, (N * C) ** 2)
             # use memmap (don't run in parallel)
             tmpfn = util.generate_tmpfn()
             Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
 
-        k = 0
-        for c in range(C):
-            L = util.L_f(C, c, c)
-            Q[k] = _pMp(X, X_inv, K, L).flatten('F') 
-            k += 1
-        for c in range(C):
-            L = util.L_f(C, c, c)
-            Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
-            k += 1
-        for i in range(C-1):
-            for j in range(i+1,C):
-                L = util.L_f(C, i, j) + util.L_f(C, j, i)
-                Q[k] = _pMp(X, X_inv, K, L).flatten('F') 
+            Q[0] = _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')).flatten('F') # proj @ np.kron(K, J_C) @ proj
+            Q[1] = _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')).flatten('F') # I_N \ot J_C
+
+            k = 2
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q[k] = _pMp(X, X_inv, K, L).flatten('F')
                 k += 1
-        for i in range(C-1):
-            for j in range(i+1,C):
-                L = util.L_f(C, i, j) + util.L_f(C, j, i)
-                Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F') 
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
+            k += 1
+
+            Q = Q.T
+            Q.flush()
+
+            QTQ = Q.T @ Q
+            QTt = Q.T @ t.flatten()
+
+    elif model == 'full':
+        if N * C < 5000000:
+            Q = []
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q.append( _pMp(X, X_inv, K, L) )
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q.append( _pMp(X, X_inv, np.eye(N, dtype='int8'), L) )
+            for i in range(C - 1):
+                for j in range(i + 1, C):
+                    L = util.L_f(C, i, j) + util.L_f(C, j, i)
+                    Q.append( _pMp(X, X_inv, K, L) )
+            for i in range(C - 1):
+                for j in range(i + 1, C):
+                    L = util.L_f(C, i, j) + util.L_f(C, j, i)
+                    Q.append( _pMp(X, X_inv, np.eye(N, dtype='int8'), L) )
+
+            for key in sorted(random_covars.keys()):
+                Z = random_covars[key]
+                Q.append( _pMp(X, X_inv, Z @ Z.T, np.ones((C, C), dtype='int8')) )
+            QTQ = np.tensordot(Q, Q, axes=([1, 2], [1, 2]))
+            QTt = np.tensordot(Q, t, axes=([1, 2], [0, 1]))
+
+        else:
+            log.logger.info('Memmory saving mode')
+            Q_shape = (C * (C + 1) + n_random, (N * C) ** 2)
+            # use memmap (don't run in parallel)
+            tmpfn = util.generate_tmpfn()
+            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
+
+            k = 0
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q[k] = _pMp(X, X_inv, K, L).flatten('F')
+                k += 1
+            for c in range(C):
+                L = util.L_f(C, c, c)
+                Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
+                k += 1
+            for i in range(C-1):
+                for j in range(i+1,C):
+                    L = util.L_f(C, i, j) + util.L_f(C, j, i)
+                    Q[k] = _pMp(X, X_inv, K, L).flatten('F')
+                    k += 1
+            for i in range(C-1):
+                for j in range(i+1,C):
+                    L = util.L_f(C, i, j) + util.L_f(C, j, i)
+                    Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
+                    k += 1
+
+            for key in sorted(random_covars.keys()):
+                Z = random_covars[key]
+                Q[k] = _pMp(X, X_inv, Z @ Z.T, np.ones((C,C), dtype='int8')).flatten('F')
                 k += 1
 
-    for key in sorted(random_covars.keys()):
-        Z = random_covars[key]
-        Q[k] = _pMp(X, X_inv, Z @ Z.T, np.ones((C,C), dtype='int8')).flatten('F')
-        k += 1
+            Q = Q.T
+            Q.flush()
 
-    Q = Q.T
-    if isinstance(Q, np.memmap):
-        Q.flush()
-
-    QTQ = Q.T @ Q
-    Qt = Q.T @ t
+            QTQ = Q.T @ Q
+            QTt = Q.T @ t.flatten()
 
     # theta
-    theta = linalg.inv(QTQ) @ Qt
+    theta = linalg.inv(QTQ) @ QTt
 
     if isinstance(Q, np.memmap):
         del Q
         os.remove(tmpfn)
 
-    return(theta)
+    return theta
 
 def _reml(loglike_fun: callable, par: list, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarray, 
         ctnu: np.ndarray, fixed_covars: dict, method: str, nrep: int) -> dict:
