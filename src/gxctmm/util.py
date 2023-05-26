@@ -853,12 +853,11 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
     # pca
     if pca is not None:
         pcs = [f'PC{i}' for i in range(1, int(PC)+1)]
-        pca = pca.loc[inds, pcs]
-        return( pca )
+        return pca.loc[inds, pcs].to_numpy()
     elif cat is not None:
-        return( pd.get_dummies( cat, drop_first=True ).loc[inds,:] )
+        return pd.get_dummies(cat, drop_first=True).loc[inds, :].to_numpy()
     elif con is not None:
-        return( con[inds] )
+        return con[inds].to_numpy()
 
 def L_f(C, c1, c2):
     # to build L matrix of 0 and 1
