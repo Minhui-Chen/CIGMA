@@ -28,14 +28,18 @@ def main():
     # collect covariates
     op_pca = pd.read_table(snakemake.input.op_pca, index_col=0)
     geno_pca = pd.read_table(snakemake.input.geno_pca, index_col=0).drop('IID',axis=1)
-    meta = pd.read_table(snakemake.input.obs, usecols=['individual', 'sex', 'age'])
+    meta = pd.read_table(snakemake.input.obs, usecols=['individual', 'sex', 'age', 'pool'])
     meta = meta.drop_duplicates()
     meta = meta.set_index('individual')
-    fixed_covars = {'op_pca': util.design(inds, pca=op_pca, PC=1).to_numpy().astype('float32'),
-            'geno_pca': util.design(inds, pca=geno_pca, PC=6).to_numpy().astype('float32'),
-            'sex': util.design(inds, cat=meta['sex']).to_numpy(),
-            'age': util.design(inds, con=meta['age']).to_numpy().astype('float32')
+    fixed_covars = {
+            'op_pca': util.design(inds, pca=op_pca, PC=1).astype('float32'),
+            'geno_pca': util.design(inds, pca=geno_pca, PC=6).astype('float32'),
+            'sex': util.design(inds, cat=meta['sex']),
+            'age': util.design(inds, cat=util.age_group(meta['age']))
             }
+    random_covars = {
+        'batch': util.design(inds, cat=meta['pool'])
+    }
 
     # run
     outs = []
@@ -59,7 +63,7 @@ def main():
             K = K.loc[inds, inds].to_numpy().astype('float32')
         
         # Full
-        full_he = fit.full_HE(ctp, K, ctnu, P, fixed_covars, dtype='float32')
+        full_he = fit.full_HE(ctp, K, ctnu, P, fixed_covars, random_covars, dtype='float32')
 
         # save
         np.save(out_f,
