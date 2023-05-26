@@ -509,7 +509,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
 
         var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
         var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
-        vsr_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
+        var_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
         var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
 
         p = {
@@ -522,7 +522,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
     else:
         p = {}
 
-    return( res, p )
+    return res, p
 
 def full_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray) -> float:
     '''
@@ -583,7 +583,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
     X = ctp.get_X(fixed_covars, N, C)
 
     theta = he_ols(Y, K, X, ctnu, 'free', random_covars, dtype=dtype)
-hom_g2, hom_e2 = theta[0], theta[1]
+    hom_g2, hom_e2 = theta[0], theta[1]
     V, W = np.diag(theta[2:(C+2)]), np.diag(theta[(C+2):(C*2+2)])
 
     # ct specific effect variance
@@ -598,16 +598,16 @@ hom_g2, hom_e2 = theta[0], theta[1]
     if output_beta:
         Vy = cal_Vy( hom_g2, hom_e2, V, W, K, ctnu )
         beta = util.glse( Vy, X, Y.flatten() )
-        # calcualte variance of fixed and random effects, and convert to dict
+        # calculate variance of fixed and random effects, and convert to dict
         beta, fixed_vars = util.cal_variance(beta, P, fixed_covars, {}, {})[:2]
         
         out['beta'] = beta
         out['fixed_vars'] = fixed_vars
 
-    return( out )
+    return out
 
 
-def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}, 
+def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
         random_covars: dict={}, jk: bool=True, dtype: str=None) -> Tuple[dict, dict]:
     """
     Fitting Free model with HE
