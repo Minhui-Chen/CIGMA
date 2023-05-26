@@ -50,12 +50,12 @@ def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[i
 
     return fixed_covars, random_covars, n_fixed, n_random, random_keys, Rs, random_MMT
 
-def age_group(age: np.ndarray):
+def age_group(age: pd.Series):
     """
     Separate age groups
     """
     bins = np.arange(25, 91, 5)
-    return np.digitize(age, bins)
+    return pd.Series(np.digitize(age, bins), index=age.index)
 
 def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, dict]:
     '''
