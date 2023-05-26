@@ -200,9 +200,9 @@ rule gene_annotation_comparison:
 # data check
 rule yazar_cell_dist:
     input:
-        meta = 'data/Yazar2022Science/meta.txt',
+        obs = 'data/Yazar2022Science/obs.txt',
     output:
-        png = 'results/Yazar2022Science/cell.dist.png',
+        png = 'results/yazar/cell.dist.png',
     params:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
@@ -210,9 +210,9 @@ rule yazar_cell_dist:
 
 rule yazar_impute_ctp_s1:
     input:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.gz',
     output:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.b_imputed.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.b_imputed.gz',
     resources:
         mem_mb = '10G',
         time = '36:00:00',
@@ -226,9 +226,9 @@ rule yazar_impute_ctp_s1:
 rule yazar_impute_ctp_s2:
     # softimpute is too slow for the whold transcriptome
     input:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.b_imputed.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.b_imputed.gz',
     output:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.a_imputed.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.a_imputed.gz',
     params:
         seed = 1234567,
     resources:
@@ -237,3 +237,119 @@ rule yazar_impute_ctp_s2:
     script: 'bin/yazar/impute.R'
 
 
+# gcta
+rule yazar_gcta_grm:
+    input:
+        genes = 'data/Yazar2022Science/gene_loation.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.chr{{chr}}.txt',
+    params:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship/gene.grm.bin',
+        r = int(float(5e5)),
+    resources:
+        mem_mb = '2G',
+    shell:
+        '''
+        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        module load gcc/11.3.0 gcta/1.94.1
+        mkdir -p $(dirname {params.kinship})
+        python3 bin/yazar/kinship.py \
+                {input.genes} {input.P} {params.r} \
+                {input.bed} {wildcards.chr} \
+                {params.kinship} {output.kinship}
+        '''
+
+#use rule yazar_he_kinship_merge as yazar_gcta_grm_merge with:
+#    input:
+#        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.chr{chr}.txt'
+#                for chr in range(1,23)],
+#    output:
+#        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.txt',
+#        save = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.txt',
+
+#rule yazar_gcta_HEreg_op:
+#    # covar and qcovar is not working in GCTA HE!!!!
+#    input:
+#        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
+#        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.chr{{chr}}.txt',
+#        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+#        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+#        meta = 'data/Yazar2022Science/meta.txt',
+#    output:
+#        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.HEreg.chr{{chr}}',
+#    params:
+#        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/rep/op.HEreg',
+#        snps = 5, # threshold of snp number per gene
+#    resources:
+#        time = '10:00:00',
+#        mem_mb = '2G',
+#    shell:
+#        '''
+#        module load gcc/11.3.0 gcta/1.94.1
+#        python3 scripts/yazar/gcta_HEreg_op.py \
+#                {input.op} {input.kinship} \
+#                {input.op_pca} {input.geno_pca} \
+#                {input.meta} {params.snps} {params.out} {output.out}
+#        '''
+#
+#rule yazar_gcta_HEreg_op_merge:
+#    input:
+#        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.HEreg.chr{chr}'
+#                for chr in range(1,23)],
+#    output:
+#        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.HEreg',
+#    run:
+#        with open(output.out, 'w') as f:
+#            f.write('gene\th2\n')
+#            for chr_out in input.out:
+#                for gene_out in open(chr_out):
+#                    gene = re.search(r"/(ENSG[^/]+)/", gene_out).group(1)
+#                    for line in open(gene_out.strip()):
+#                        if re.search(r'V\(G\)\/Vp', line):
+#                            h2 = line.strip().split()[1]
+#                            break
+#                    f.write(f'{gene}\t{h2}\n')
+            
+rule yazar_gcta_greml_op:
+    input:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.chr{{chr}}.txt',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.chr{{chr}}',
+    params:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/rep/op.hsq',
+        snps = 5, # threshold of snp number per gene
+    resources:
+        time = '10:00:00',
+        mem_mb = '2G',
+    shell:
+        '''
+        module load gcc/11.3.0 gcta/1.94.1
+        python3 scripts/yazar/gcta_greml_op.py \
+                {input.op} {input.kinship} \
+                {input.op_pca} {input.geno_pca} \
+                {input.obs} {params.snps} {params.out} {output.out}
+        '''
+
+rule yazar_gcta_greml_op_merge:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.chr{chr}'
+                for chr in range(1,23)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml',
+    run:
+        with open(output.out, 'w') as f:
+            f.write('gene\th2\n')
+            for chr_out in input.out:
+                for gene_out in open(chr_out):
+                    gene = re.search(r"/(ENSG[^/]+)/", gene_out).group(1)
+                    for line in open(gene_out.strip()):
+                        if re.search(r'V\(G\)\/Vp', line):
+                            h2 = line.strip().split()[1]
+                            break
+                    f.write(f'{gene}\t{h2}\n')

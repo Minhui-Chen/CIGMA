@@ -1,6 +1,7 @@
 from snakemake.utils import Paramspace 
-import os, time, shutil 
+import os, re, time, shutil 
 import numpy as np, pandas as pd
+import matplotlib.pyplot as plt
 import seaborn as sns
 
 # make a logs folders to save log files
@@ -196,26 +197,66 @@ rule yazar_extract_meta:
     input:
         h5ad = 'data/Yazar2022Science/OneK1K_cohort_gene_expression_matrix_14_celltypes.h5ad.gz',
     output:
-        meta = 'data/Yazar2022Science/meta.txt',
-        genes = 'data/Yazar2022Science/genes.txt',
+        obs = 'data/Yazar2022Science/obs.txt', # cells
+        var = 'data/Yazar2022Science/var.txt', # genes
     run:
         import scanpy as sc
 
         data = sc.read_h5ad(input.h5ad, backed='r')
-        meta = data.obs.reset_index(drop=False, names='cell')
-        meta.to_csv(output.meta, sep='\t', index=False)
+        obs = data.obs.reset_index(drop=False, names='cell')
+        obs.to_csv(output.obs, sep='\t', index=False)
 
-        genes = data.var.reset_index(drop=False, names='feature')
-        genes.to_csv(output.genes, sep='\t', index=False)
+        var = data.var.reset_index(drop=False, names='feature')
+        var.to_csv(output.var, sep='\t', index=False)
+
+rule yazar_exclude_repeatedpool:
+    input:
+        obs = 'data/Yazar2022Science/obs.txt',
+    output:
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+        dup_inds = 'analysis/yazar/duplicated_inds.txt',
+    params:
+        ind_col = yazar_ind_col, 
+    run:
+        obs = pd.read_table(input.obs)
+        # id repeated pool: the same individual seqed in more than one pool
+        data = obs[['pool',params.ind_col]].drop_duplicates()
+        inds, counts = np.unique(data[params.ind_col], return_counts=True)
+        inds = inds[counts > 1]
+        np.savetxt(output.dup_inds, inds, fmt='%s')
+
+        # for each ind find the largest pool
+        for ind in inds:
+            pools, counts = np.unique(obs.loc[obs[params.ind_col]==ind,'pool'], return_counts=True)
+            excluded_pools = pools[counts < np.amax(counts)]
+            obs = obs.loc[~((obs[params.ind_col]==ind) & (obs['pool'].isin(excluded_pools)))]
+
+        obs.to_csv(output.obs, sep='\t', index=False)
+
+rule yazar_age:
+    input:
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        png = 'results/yazar/age.png',
+    run:
+        obs = pd.read_table(input.obs)
+        obs = obs.drop_duplicates(subset='individual')
+        ages, counts = np.unique(obs['age'], return_counts=True)
+        fig, ax = plt.subplots(dpi=600)
+        plt.bar(ages, counts)
+        ax.set_xlabel('Age')
+        ax.set_ylabel('Number of individuals')
+        fig.savefig(output.png)
 
 rule yazar_ctp_extractX:
     input:
         h5ad = 'data/Yazar2022Science/OneK1K_cohort_gene_expression_matrix_14_celltypes.h5ad.gz',
-        genes = 'data/Yazar2022Science/genes.txt',
+        var = 'data/Yazar2022Science/var.txt',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
     output:
-        X = 'staging/data/Yazar2022Science/X.npz',
-        obs = 'staging/data/Yazar2022Science/obs.gz',
-        var = 'staging/data/Yazar2022Science/var.gz',
+        X = 'staging/data/yazar/X.npz',
+        obs = 'staging/data/yazar/obs.gz',
+        var = 'staging/data/yazar/var.gz',
     params:
         ind_col = yazar_ind_col, 
         ct_col = yazar_ct_col,
@@ -225,14 +266,24 @@ rule yazar_ctp_extractX:
         import scanpy as sc
         from scipy import sparse
 
-        genes = pd.read_table(input.genes)
+        genes = pd.read_table(input.var)
         if 'feature_is_filtered' in genes.columns:
             genes = genes.loc[~genes['feature_is_filtered'], 'feature'].to_numpy()
         else:
             genes = genes['feature'].to_numpy()
 
+        if 'subset_gene' in params.keys():
+            # random select genes
+            rng = np.random.default_rng(seed=params.seed)
+            genes = rng.choice(genes, params.subset_gene, replace=False)
+
+        obs = pd.read_table(input.obs)
+        ind_pool = np.unique(obs[params.ind_col].astype('str')+'+'+obs['pool'].astype('str'))
+
         ann = sc.read_h5ad(input.h5ad, backed='r')
-        data = ann[(~ann.obs[params.ind_col].isna()) & (~ann.obs[params.ct_col].isna()), genes]
+        data = ann[(~ann.obs[params.ind_col].isna()) 
+                & (~ann.obs[params.ct_col].isna()) 
+                & (ann.obs[params.ind_col].astype('str')+'+'+ann.obs['pool'].astype('str')).isin(ind_pool), genes]
         # natural logarithm of one plus the input array
         X = data.X.log1p()
         sparse.save_npz(output.X, X)
@@ -242,9 +293,9 @@ rule yazar_ctp_extractX:
 
 rule yazar_ctp:
     input:
-        X = 'staging/data/Yazar2022Science/X.npz',
-        obs = 'staging/data/Yazar2022Science/obs.gz',
-        var = 'staging/data/Yazar2022Science/var.gz',
+        X = 'staging/data/yazar/X.npz',
+        obs = 'staging/data/yazar/obs.gz',
+        var = 'staging/data/yazar/var.gz',
     output:
         ctp = 'data/Yazar2022Science/ctp.gz',
         ctnu = 'data/Yazar2022Science/ctnu.gz',
@@ -271,56 +322,35 @@ rule yazar_ctp:
         P.to_csv(output.P, sep='\t')
         n.to_csv(output.n, sep='\t')
 
-rule yazar_var_ctnu_extract_genes:
+use rule yazar_ctp_extractX as yazar_var_ctnu_extract_genes with:
 # don't know why it takes a lot of memory to extract the X matrix.
 # so extract X before compting var of ctnu
-    input:
-        h5ad = 'data/Yazar2022Science/OneK1K_cohort_gene_expression_matrix_14_celltypes.h5ad.gz',
-        genes = 'data/Yazar2022Science/genes.txt',
     output:
-        X = 'staging/data/Yazar2022Science/var_ctnu.genes.npz',
-        genes = 'staging/data/Yazar2022Science/var_ctnu.genes.txt',
+        X = 'staging/data/yazar/var_ctnu/genes.npz',
+        obs = 'staging/data/yazar/var_ctnu/obs.gz',
+        var = 'staging/data/yazar/var_ctnu/var.gz',
     params:
+        ind_col = yazar_ind_col, 
+        ct_col = yazar_ct_col,
         seed = 123567,
-        gene_no = 1000,
-    resources:
-        mem_mb = '40G',
-    run:
-        import scanpy as sc
-        from scipy import sparse
-
-        ann = sc.read_h5ad(input.h5ad, backed='r')
-
-        genes = pd.read_table(input.genes, sep='\t')
-        if 'feature_is_filtered' in genes.columns:
-            genes = genes.loc[~genes['feature_is_filtered'], 'feature'].to_numpy()
-        else:
-            genes = genes['feature'].to_numpy()
-        # random select genes
-        rng = np.random.default_rng(seed=params.seed)
-        genes = rng.choice(genes, params.gene_no, replace=False)
-        with open(output.genes, 'w') as f:
-            f.write( '\n'.join(genes.tolist()) )
-
-        data = ann[:,genes].X
-        sparse.save_npz(output.X, data)
+        subset_gene = 1000,
 
 rule yazar_var_ctnu_split:
     input:
-        meta = 'data/Yazar2022Science/meta.txt',
+        obs = 'staging/data/yazar/var_ctnu/obs.gz',
     output:
-        batches = expand('staging/data/Yazar2022Science/var_ctnu/ind_ct.batch{i}', i=range(10)),
+        batches = expand('staging/data/yazar/var_ctnu/ind_ct.batch{i}', i=range(10)),
     params:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
     run:
-        meta = pd.read_table(input.meta)
-        meta = meta.rename(columns={params.ind_col:'ind', params.ct_col:'ct'})
+        obs = pd.read_table(input.obs)
+        obs = obs.rename(columns={params.ind_col:'ind', params.ct_col:'ct'})
 
         # pairs of ind and ct
-        ind_ct = meta.loc[(~meta['ind'].isna()) & (~meta['ct'].isna()), ['ind', 'ct']].drop_duplicates()
+        ind_ct = obs.loc[(~obs['ind'].isna()) & (~obs['ct'].isna()), ['ind', 'ct']].drop_duplicates()
 
-        # Split the DataFrame into 3 smaller DataFrames of roughly equal size
+        # Split the DataFrame into smaller DataFrames
         ind_ct_batches = np.array_split(ind_ct, len(output.batches))
         
         for batch, batch_f in zip(ind_ct_batches, output.batches):
@@ -328,12 +358,12 @@ rule yazar_var_ctnu_split:
 
 rule yazar_var_ctnu:
     input:
-        meta = 'data/Yazar2022Science/meta.txt',
-        X = 'staging/data/Yazar2022Science/var_ctnu.genes.npz',
-        genes = 'staging/data/Yazar2022Science/var_ctnu.genes.txt',
-        batch = 'staging/data/Yazar2022Science/var_ctnu/ind_ct.batch{i}',
+        X = 'staging/data/yazar/var_ctnu/genes.npz',
+        obs = 'staging/data/yazar/var_ctnu/obs.gz',
+        var = 'staging/data/yazar/var_ctnu/var.gz',
+        batch = 'staging/data/yazar/var_ctnu/ind_ct.batch{i}',
     output:
-        var_ctnu = 'staging/data/Yazar2022Science/var_ctnu/batch{i}.gz',
+        var_ctnu = 'staging/data/yazar/var_ctnu/batch{i}.gz',
     params:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
@@ -358,9 +388,9 @@ rule yazar_var_ctnu:
             return( ctnus )
 
         X = sparse.load_npz(input.X)
-        meta = pd.read_table(input.meta)
-        meta = meta.rename(columns={params.ind_col:'ind', params.ct_col:'ct'})
-        genes = [line.strip() for line in open(input.genes)]
+        obs = pd.read_table(input.obs)
+        obs = obs.rename(columns={params.ind_col:'ind', params.ct_col:'ct'})
+        genes = pd.read_table(input.var)['feature'].to_numpy()
 
         # pairs of ind and ct
         ind_ct = pd.read_table(input.batch)
@@ -371,7 +401,7 @@ rule yazar_var_ctnu:
         for index, row in ind_ct.iterrows():
             print( index, flush=True )
             ind, ct = row['ind'], row['ct']
-            data = X[(meta['ind']==ind) & (meta['ct']==ct), :]
+            data = X[(obs['ind']==ind) & (obs['ct']==ct), :]
             if data.shape[0] < 10:
                 continue
             else:
@@ -388,9 +418,9 @@ rule yazar_var_ctnu:
 
 rule yazar_var_ctnu_merge:
     input:
-        var_ctnu = expand('staging/data/Yazar2022Science/var_ctnu/batch{i}.gz', i=range(10)),
+        var_ctnu = expand('staging/data/yazar/var_ctnu/batch{i}.gz', i=range(10)),
     output:
-        var_ctnu = 'analysis/Yazar2022Science/var_ctnu.gz',
+        var_ctnu = 'analysis/yazar/var_ctnu.gz',
     shell:
         "zcat {input.var_ctnu}|awk '!(FNR==1 && NR!=1) {{print}}' |gzip -c > {output.var_ctnu}"
 
@@ -400,19 +430,19 @@ rule yazar_rm_rareINDnCT:
         ctnu = 'data/Yazar2022Science/ctnu.gz',
         n = 'data/Yazar2022Science/n.gz',
     output:
-        ctp = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.gz',
-        ctnu = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctnu.gz',
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        n = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/n.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/n.gz',
     resources:
         mem_mb = '10G',
     script: 'bin/yazar/rm_rareINDnCT.py'
 
 rule yazar_mvn_ctp:
     input:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.gz',
     output:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
     resources:
         mem_mb = '10G',
     run:
@@ -422,20 +452,20 @@ rule yazar_mvn_ctp:
 
 use rule yazar_mvn_ctp as yazar_mvn_ctnu with:
     input:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctnu.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.gz',
     output:
-        data = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
+        data = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
 
 rule yazar_std_op:
     input:
-        ctp = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
-        ctnu = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
     output:
-        op = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
-        nu = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/nu.mvn.gz',
-        ctp = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
-        ctnu = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
+        nu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/nu.mvn.gz',
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
     resources:
         mem_mb = '10G',
     run:
@@ -453,12 +483,12 @@ rule yazar_std_op:
 
 rule yazar_op_pca:
     input:
-        op = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
     output:
-        evec = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/evec.txt',
-        eval = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/eval.txt',
-        pca = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/pca.txt',
-        png = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/pca.png',
+        evec = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/evec.txt',
+        eval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/eval.txt',
+        pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        png = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.png',
     resources:
         mem_mb = '4G',
     script: 'bin/yazar/pca.py'
@@ -467,11 +497,11 @@ rule yazar_exclude_duplicatedSNPs:
     input:
         vcf = 'data/Yazar2022Science/filter_vcf_r08/chr{chr}.dose.filtered.R2_0.8.vcf.gz',
     output:
-        bed = 'analysis/Yazar2022Science/data/geno/chr{chr}.bed',
-        dup = 'analysis/Yazar2022Science/data/geno/chr{chr}.dup',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+        dup = 'analysis/yazar/data/geno/chr{chr}.dup',
     shell:
         '''
-        module load plink/1.90b6.21
+        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
         prefix="$(dirname {output.bed})/$(basename {output.bed} .bed)"
         zcat {input.vcf}|grep -v '#'|cut -f 3|sort|uniq -d > {output.dup}
         plink --vcf {input.vcf} --double-id --keep-allele-order \
@@ -482,22 +512,22 @@ rule yazar_exclude_duplicatedSNPs:
 
 rule yazar_geno_pca:
     input:
-        bed = expand('analysis/Yazar2022Science/data/geno/chr{chr}.bed',
+        bed = expand('analysis/yazar/data/geno/chr{chr}.bed',
                 chr=range(1,23)),
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
     output:
-        eigenvec = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
-        eigenval = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenval',
+        eigenvec = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        eigenval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenval',
     params:
         prefix = lambda wildcards, output: os.path.splitext(output.eigenvec)[0],
-        tmp_dir = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno_tmp',
+        tmp_dir = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/geno_tmp',
     shell:
         '''
         if [ -d {params.tmp_dir} ]; then 
             rm -r {params.tmp_dir} 
         fi
         mkdir -p {params.tmp_dir}
-        module load plink/1.90b6.21
+        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
         ind_f="{params.tmp_dir}/inds.txt" 
         zcat {input.P}|tail -n +2|awk '{{print $1,$1}}' > $ind_f
         merge_f="{params.tmp_dir}/merge.list"
@@ -525,9 +555,9 @@ rule yazar_geno_pca:
 
 rule yazar_geno_pca_plot:
     input:
-        eigenval = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenval',
+        eigenval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenval',
     output:
-        png = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenval.png',
+        png = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenval.png',
     run:
         import matplotlib.pyplot as plt
         vals = np.loadtxt(input.eigenval)
@@ -549,31 +579,31 @@ rule yazar_gene_location:
 rule yazar_he_kinship:
     input:
         genes = 'data/Yazar2022Science/gene_loation.txt',
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        bed = 'analysis/Yazar2022Science/data/geno/chr{chr}.bed',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
     output:
-        kinship = temp(f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.chr{{chr}}.txt'),
+        kinship = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.chr{{chr}}.txt'),
     params:
-        kinship = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship/gene.rel.bin', 
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship/gene.rel.bin', 
         r = int(float(5e5)),
     resources:
         mem_mb = '2G',
     shell: 
         '''
+        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
         mkdir -p $(dirname {params.kinship})
-        module load plink/1.90b6.21
         python3 bin/yazar/kinship.py {input.genes} {input.P} {params.r} {input.bed} {wildcards.chr} \
                         {params.kinship} {output.kinship} 
         '''
 
 rule yazar_he_kinship_merge:
     input:
-        kinship = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.chr{chr}.txt'
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.chr{chr}.txt'
                 for chr in range(1,23)],
     output:
-        #kinship = temp(f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt'),
-        kinship = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
-        save = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        #kinship = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt'),
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        save = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
     shell:
         '''
         awk '!(FNR==1 && NR!=1) {{print}}' {input.kinship} > {output.kinship}
@@ -583,12 +613,12 @@ rule yazar_he_kinship_merge:
 yazar_he_batches = 2000
 rule yazar_HE_split:
     input:
-        ctp = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
-        ctnu = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
     output:
-        ctp = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{i}.gz'
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{i}.gz'
                 for i in range(yazar_he_batches)],
-        ctnu = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{i}.gz'
+        ctnu = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{i}.gz'
                 for i in range(yazar_he_batches)],
     resources:
         mem_mb = '10G',
@@ -603,17 +633,17 @@ rule yazar_HE_split:
 
 rule yazar_HE_full:
     input:
-        ctp = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
-        ctnu = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
-        kinship = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        op_pca = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/pca.txt',
-        geno_pca = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
-        meta = 'data/Yazar2022Science/meta.txt',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'staging/data/yazar/obs.gz',
     output:
-        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.batch{{i}}',
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.full.batch{{i}}',
     params:
-        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/rep/he.full.npy',
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/rep/he.full.npy',
         snps = 5, # threshold of snp number per gene
     resources:
         time = '10:00:00',
@@ -622,64 +652,63 @@ rule yazar_HE_full:
 
 rule yazar_HE_full_merge:
     input:
-        out = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.batch{i}'
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.full.batch{i}'
             for i in range(5)],
     output:
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.npy',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.full.npy',
     script: 'bin/mergeBatches.py'
 
 rule yazar_HE_Full_plot:
     input:
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.full.npy',
     output:
-        cov = f'results/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.cov.png',
-        h2 = f'results/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.h2.png',
+        cov = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.full.cov.png',
+        h2 = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.full.h2.png',
     script: 'bin/yazar/full.plot.py'
 
 rule yazar_HE_free:
     input:
-        ctp = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
-        ctnu = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
-        kinship = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        op_pca = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/pca.txt',
-        geno_pca = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
-        meta = 'data/Yazar2022Science/meta.txt',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'staging/data/yazar/obs.gz',
     output:
-        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.free.batch{{i}}',
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.batch{{i}}',
     params:
-        out = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/rep/he.free.npy',
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/rep/he.free.npy',
         snps = 5, # threshold of snp number per gene
     resources:
         time = '10:00:00',
         mem_mb = '20G',
-        burden = 600,
     script: 'bin/yazar/he.free.py'
 
 rule yazar_HE_free_merge:
     input:
-        out = [f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.free.batch{i}'
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.batch{i}'
             for i in range(5)],
     output:
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.free.npy',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.npy',
     script: 'bin/mergeBatches.py'
 
 rule yazar_HE_Free_plot:
     # the script is for Full model
     input:
-        P = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/P.gz',
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.free.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.npy',
     output:
-        h2 = f'results/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.free.h2.png',
-    script: 'bin/yazar/full.plot.py'
+        h2 = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.free.h2.png',
+    script: 'bin/yazar/free.plot.py'
 
 rule yazar_HE_clean:
     input:
-        out = f'analysis/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.full.npy',
-        kinship = f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.full.npy',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
     output:
-        touch(f'staging/Yazar2022Science/{yazar_paramspace.wildcard_pattern}/he.done')
+        touch(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.done')
     run:
         kinship = pd.read_table(input.kinship)
         for f in kinship['K'].tolist():
@@ -687,7 +716,8 @@ rule yazar_HE_clean:
 
 rule yazar_all:
     input:
-        ctp = expand('analysis/Yazar2022Science/{params}/ctp.mvn.gz', params=yazar_paramspace.instance_patterns),
+        full = expand('results/yazar/{params}/he.full.h2.png', params=yazar_paramspace.instance_patterns),
+        free = expand('results/yazar/{params}/he.free.h2.png', params=yazar_paramspace.instance_patterns),
 
 #######################################################################################
 # Perez 2022 Science
@@ -698,8 +728,8 @@ use rule yazar_extract_meta as perez_extract_meta with:
     input:
         h5ad = 'data/Perez2022Science/local.h5ad',
     output:
-        meta = 'data/Perez2022Science/meta.txt',
-        genes = 'data/Perez2022Science/genes.txt',
+        obs = 'data/Perez2022Science/obs.txt',
+        var = 'data/Perez2022Science/var.txt',
 
 #use rule yazar_ctp as perez_ctp with:
 #    input:
@@ -718,7 +748,7 @@ use rule yazar_var_ctnu_extract_genes as perez_var_ctnu_extract_genes with:
     # so extract X before compting var of ctnu
     input:
         h5ad = 'data/Perez2022Science/local.h5ad',
-        genes = 'data/Perez2022Science/genes.txt',
+        var = 'data/Perez2022Science/var.txt',
     output:
         counts = 'staging/data/Perez2022Science/var_ctnu.genes.npz',
         genes = 'staging/data/Perez2022Science/var_ctnu.genes.txt',
@@ -728,7 +758,7 @@ use rule yazar_var_ctnu_extract_genes as perez_var_ctnu_extract_genes with:
 
 use rule yazar_var_ctnu as perez_var_ctnu with:
     input:
-        meta = 'data/Perez2022Science/meta.txt',
+        obs = 'data/Perez2022Science/obs.txt',
         counts = 'staging/data/Perez2022Science/var_ctnu.genes.npz',
         genes = 'staging/data/Perez2022Science/var_ctnu.genes.txt',
     output:
