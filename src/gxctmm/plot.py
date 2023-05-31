@@ -4,6 +4,14 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+def _clip(x: pd.Series, cut=3) -> pd.Series:
+    """
+    Clip x to mean +/-cut*std
+    """
+    mean, std = x.mean(), x.std()
+    x = x.clip(mean - cut*std, mean + cut*std)
+    return x
+    
 def mycolors(n: int=10, palette: str='muted', desat: float=None) -> list:
     """
     Return colors in hex format from the sns.color_palette('colorblind').
