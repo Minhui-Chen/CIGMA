@@ -27,7 +27,7 @@ def get_X(fixed_covars: dict, N: int, C: int, shared: bool=True) -> np.ndarray:
     """
 
     X = np.kron( np.ones((N,1)), np.eye(C) )
-    for key in np.sort(list(fixed_covars.keys())):
+    for key in sorted(fixed_covars.keys()):
         m = fixed_covars[key]
         if len( m.shape ) == 1:
             m = m.reshape(-1,1)
@@ -320,27 +320,27 @@ def FixedeffectVariance( beta: np.ndarray, xs: np.ndarray ) -> list:
         j = j + x.shape[1]
     return( vars )
 
-def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars_d: dict) -> Tuple[dict, dict]:
-    '''
+def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars: dict) -> Tuple[dict, dict]:
+    """
     Estimate variance explained by each feature of fixed effect, e.g. cell type, sex
 
     Parameters:
         beta:   fixed effect sizes
         P:  cell type proportions
-        fixed_covars_d: design matrices for fixed effects
+        fixed_covars: design matrices for Extra fixed effects
     Returns:
-        a tuple of 
+        a tuple of
             #. dict of fixed effects
             #. dict of variances explained
-    '''
+    """
     # read covars if needed
-    fixed_covars_d = read_covars(fixed_covars_d, {})[0]
+    fixed_covars = read_covars(fixed_covars, {})[0]
 
-    beta_d = assign_beta(beta, P, fixed_covars_d)
+    beta_d = assign_beta(beta, P, fixed_covars)
 
-    fixed_vars_d = {'ct_beta': FixedeffectVariance_( beta_d['ct_beta'], P) }
-    for key in fixed_covars_d.keys():
-        fixed_vars_d[key] = FixedeffectVariance_( beta_d[key], fixed_covars_d[key] )
+    fixed_vars = {'ct_beta': FixedeffectVariance_( beta_d['ct_beta'], P) }
+    # for key in fixed_covars.keys():
+    #     fixed_vars[key] = FixedeffectVariance_( beta_d[key], fixed_covars[key] )
 
 #    fixed_covars_l = [P]
 #    for key in np.sort(list(fixed_covars_d.keys())):
@@ -355,33 +355,44 @@ def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars_d: dict) -> T
 #
 #    fixedeffect_vars_d = assign_fixedeffect_vars(fixedeffect_vars_l, fixed_covars_d)
 
-    return(beta_d, fixed_vars_d)
+    return beta_d, fixed_vars
 
-def assign_beta(beta_l: list, P: np.ndarray, fixed_covars_d: dict) -> dict:
-    '''
+def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
+    """
     Convert a list of fixed effect to dict for each feature
 
     Parameters:
         beta_l: fixed effects
         P:  cell type proportions
-        fixed_covars_d: design matrices for fixed effects
+        fixed_covars: design matrices for Extra fixed effects
     Returns:
         dict of fixed effects
-    '''
-    beta_d = { 'ct_beta': beta_l[:P.shape[1]] }
-    beta_l = beta_l[P.shape[1]:]
+    """
+    N, C = P.shape
 
-    for key in np.sort(list(fixed_covars_d.keys())):
-        x = fixed_covars_d[key] 
+    beta_d = { 'ct_beta': beta_l[:C] }
+    beta_l = beta_l[C:]
+
+    if len(beta_l) == len(fixed_covars.keys()):
+        shared = True
+    else:
+        shared = False
+
+    for key in sorted(fixed_covars.keys()):
+        x = fixed_covars[key]
         if len( x.shape ) == 1:
             x = x.reshape(-1,1)
-        beta_d[key] = beta_l[:x.shape[1]]
-        beta_l = beta_l[x.shape[1]:]
+        if shared:
+            beta_d[key] = beta_l[:x.shape[1]]
+            beta_l = beta_l[x.shape[1]:]
+        else:
+            beta_d[key] = beta_l[:(x.shape[1]*C)]
+            beta_l = beta_l[x.shape[1] * C]
 
-    return(beta_d)
+    return beta_d
 
 def assign_fixedeffect_vars(fixedeffect_vars_l: list, fixed_covars_d: dict) -> dict:
-    '''
+    """
     Assign fixed effect variance to each feature
 
     Parameters:
@@ -389,7 +400,7 @@ def assign_fixedeffect_vars(fixedeffect_vars_l: list, fixed_covars_d: dict) -> d
         fixed_covars_d: design matrices for fixed effects
     Returns:
         fixed effects variances for each feature
-    '''
+    """
     fixedeffect_vars_d = {'celltype_main_var': fixedeffect_vars_l[0]}
     if len(fixed_covars_d.keys()) > 0:
         for key, value in zip(np.sort(list(fixed_covars_d.keys())), fixedeffect_vars_l[1:]):
@@ -455,9 +466,10 @@ def ct_random_var( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.ndarray]:
 
     return( ct_overall_var, ct_specific_var )
 
-def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[list, np.ndarray, dict], 
-        random_covars: dict) -> Tuple[dict, dict, dict, dict]:
-    '''
+def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict,
+                 r2: dict, random_covars: dict
+                 ) -> Tuple[dict, dict, dict, dict]:
+    """
     Compute variance explained by fixed effects and random effects
 
     Parameters:
@@ -468,21 +480,21 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict, r2: Union[
         random_covars:  design matrices for additional random effects
 
     Returns:
-        a tuple of 
+        a tuple of
             #.  dict of fixed effects
             #.  dict of OP variance explained by fixed effects
-            #.  dict of random effect variances
             #.  dict of OP variance explained by random effects
-    '''
-    # calcualte variance of fixed and random effects, and convert to dict
+    """
+    # calculate variance of fixed and random effects, and convert to dict
     beta, fixed_vars = fixedeffect_vars( beta, P, fixed_covars ) # fixed effects are always ordered
-    if isinstance(r2, list) or isinstance(r2, np.ndarray):
-        r2 = dict(zip( np.sort(list(random_covars.keys())), r2 ))
-    random_vars = RandomeffectVariance( r2, random_covars )
-    return( beta, fixed_vars, r2, random_vars )
+    if isinstance(list(r2.values())[0], float):
+        random_vars = RandomeffectVariance( r2, random_covars )
+    else:
+        random_vars = {}
+    return beta, fixed_vars, random_vars
 
 def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> float:
-    '''
+    """
     Wald test on mean expression differentiation
 
     Parameters:
@@ -492,7 +504,7 @@ def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> floa
         P:  number of estimated parameters (for Ftest in Wald test)
     Returns:
         p value for Wald test on mean expression differentiation
-    '''
+    """
     C = len(beta)
     T = np.concatenate( ( np.eye(C-1), (-1)*np.ones((C-1,1)) ), axis=1 )
     beta = T @ beta

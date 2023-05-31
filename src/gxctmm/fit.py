@@ -6,7 +6,7 @@ import zarr
 import dask.array as da
 from memory_profiler import profile 
 
-from ctmm import wald, ctp
+from ctmm import wald
 from . import log, util
 
 def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, r2:dict,
@@ -35,7 +35,10 @@ def cal_Vy(hom_g2: float, hom_e2: float, V: np.ndarray, W: np.ndarray, r2:dict,
     for key in random_covars.keys():
         Z = random_covars[key]
         ZZT = Z @ Z.T
-        Vy += np.kron(ZZT, np.diag(r2[key])) # TODO: change back to shared random effect
+        if isinstance(r2[key], float):
+            Vy += np.kron(ZZT, np.ones((C,C))) * r2[key] # shared random effect
+        else:
+            Vy += np.kron(ZZT, np.diag(r2[key])) # cell type-specific random effect
 
     return Vy
 
@@ -65,7 +68,7 @@ def LL(y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray, random_cov
     # inverse variance
     w, v = linalg.eigh(Vy)
     if ( np.amax(w)/np.amin(w) ) > 1e8 or np.amin(w) < 0:
-        return(1e12)
+        return 1e12
     
     # calculate B matrix
     m1 = X.T @ v @ np.diag(1/w) @ v.T 
@@ -83,13 +86,21 @@ def _get_r2(r2:list, random_covars:dict, C:int) -> dict:
     """
     Covert list of r2 to dictionary
     """
+    if len(r2) == len(random_covars.keys()):
+        shared = True
+    else:
+        shared = False
+
     r2_d = {}
     for i, key in enumerate(sorted(random_covars.keys())):
-        r2_d[key] = r2[(i*C):((i+1)*C)]
+        if shared:
+            r2_d[key] = r2[i]
+        else:
+            r2_d[key] = r2[(i * C):((i + 1) * C)]
     return r2_d
 
-def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray, 
-        fixed_covars: dict, random_covars:dict ) -> dict:
+def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarray,
+             ctnu: np.ndarray, fixed_covars: dict, random_covars:dict ) -> dict:
     """
     Extract REML optimization resutls
 
@@ -145,7 +156,7 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
 
     # beta
     y = Y.flatten()
-    X = ctp.get_X( fixed_covars, N, C )
+    X = util.get_X( fixed_covars, N, C, shared=False )
 
     Vy = cal_Vy( hom_g2, hom_e2, V, W, r2, K, ctnu, random_covars )
     beta = util.glse( Vy, X, y )
@@ -185,7 +196,7 @@ def _pMp(X:np.ndarray, X_inv: np.ndarray, A:np.ndarray, B:np.ndarray) -> np.ndar
     return M
 
 def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
-           model: str, random_covars: dict={}, dtype:str = None) -> np.ndarray:
+           model: str, random_covars: dict={}, shared:bool=True, dtype:str = None) -> np.ndarray:
     """
     Perform OLS in HE
 
@@ -195,6 +206,8 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
         X:  design matrix for fixed effects
         ctnu: cell type-specific noise variance
         model:  free / full
+        random_covars:  design matrices for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         dtype:  data type e.g. float32 to save memory
     Returns:
         a tuple of
@@ -209,7 +222,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
     N, C = Y.shape
     y = Y.flatten()
     X_inv = linalg.inv(X.T @ X)
-    n_random = len(random_covars.keys())
+    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
 
     # projection matrix
     proj = np.eye(N * C, dtype='int8') - X @ X_inv @ X.T # X: 1_N \otimes I_C append sex \otimes 1_C 
@@ -223,7 +236,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
 
     # build Q: list of coefficients
     if model == 'free':
-        if N * C < (10000 * 100):
+        if N * C < (10000 * 100000):
             Q = []
             Q.append( _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')) )
             Q.append( _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')) )
@@ -233,42 +246,45 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
             for c in range(C):
                 L = util.L_f(C, c, c)
                 Q.append( _pMp(X, X_inv, np.eye(N, dtype='int8'), L) )
-            for key in sorted(random_covars.keys()): # TODO: change back to shared random effect across CTs
+            for key in sorted(random_covars.keys()):
                 Z = random_covars[key]
                 ZZT = Z @ Z.T
-                for c in range(C):
-                    L = util.L_f(C, c, c)
-                    Q.append( _pMp(X, X_inv, ZZT, L) )
+                if shared:
+                    Q.append( _pMp(X, X_inv, ZZT, np.ones((C,C), dtype='int8')) )
+                else:
+                    for c in range(C):
+                        L = util.L_f(C, c, c)
+                        Q.append( _pMp(X, X_inv, ZZT, L) )
             QTQ = np.tensordot(Q, Q, axes=([1, 2], [1, 2]))
             QTt = np.tensordot(Q, t, axes=([1, 2], [0, 1]))
-        else:
-            log.logger.info('Memory saving mode')
-            Q_shape = (2 * (C + 1) + n_random, (N * C) ** 2)
-            # use memmap (don't run in parallel)
-            tmpfn = util.generate_tmpfn()
-            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
-
-            Q[0] = _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')).flatten('F') # proj @ np.kron(K, J_C) @ proj
-            Q[1] = _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')).flatten('F') # I_N \ot J_C
-
-            k = 2
-            for c in range(C):
-                L = util.L_f(C, c, c)
-                Q[k] = _pMp(X, X_inv, K, L).flatten('F')
-                k += 1
-            for c in range(C):
-                L = util.L_f(C, c, c)
-                Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
-            k += 1
-
-            Q = Q.T
-            Q.flush()
-
-            QTQ = Q.T @ Q
-            QTt = Q.T @ t.flatten()
+        # else:
+        #     log.logger.info('Memory saving mode')
+        #     Q_shape = (2 * (C + 1) + n_random, (N * C) ** 2)
+        #     # use memmap (don't run in parallel)
+        #     tmpfn = util.generate_tmpfn()
+        #     Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
+        #
+        #     Q[0] = _pMp(X, X_inv, K, np.ones((C,C), dtype='int8')).flatten('F') # proj @ np.kron(K, J_C) @ proj
+        #     Q[1] = _pMp(X, X_inv, np.eye(N, dtype='int8'), np.ones((C,C), dtype='int8')).flatten('F') # I_N \ot J_C
+        #
+        #     k = 2
+        #     for c in range(C):
+        #         L = util.L_f(C, c, c)
+        #         Q[k] = _pMp(X, X_inv, K, L).flatten('F')
+        #         k += 1
+        #     for c in range(C):
+        #         L = util.L_f(C, c, c)
+        #         Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
+        #     k += 1
+        #
+        #     Q = Q.T
+        #     Q.flush()
+        #
+        #     QTQ = Q.T @ Q
+        #     QTt = Q.T @ t.flatten()
 
     elif model == 'full':
-        if N * C < 5000000:
+        if N * C < 5000000000:
             log.logger.info('Making Q')
             Q = []
             for c in range(C):
@@ -288,49 +304,55 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
 
             for key in sorted(random_covars.keys()):
                 Z = random_covars[key]
-                Q.append( _pMp(X, X_inv, Z @ Z.T, np.ones((C, C), dtype='int8')) )
+                ZZT = Z @ Z.T
+                if shared:
+                    Q.append( _pMp(X, X_inv, ZZT, np.ones((C, C), dtype='int8')) )
+                else:
+                    for c in range(C):
+                        L = util.L_f(C, c, c)
+                        Q.append( _pMp(X, X_inv, ZZT, L) )
 
             log.logger.info('Calculating Q products')
             QTQ = np.tensordot(Q, Q, axes=([1, 2], [1, 2]))
             QTt = np.tensordot(Q, t, axes=([1, 2], [0, 1]))
 
-        else:
-            log.logger.info('Memmory saving mode')
-            Q_shape = (C * (C + 1) + n_random, (N * C) ** 2)
-            # use memmap (don't run in parallel)
-            tmpfn = util.generate_tmpfn()
-            Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
-
-            k = 0
-            for c in range(C):
-                L = util.L_f(C, c, c)
-                Q[k] = _pMp(X, X_inv, K, L).flatten('F')
-                k += 1
-            for c in range(C):
-                L = util.L_f(C, c, c)
-                Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
-                k += 1
-            for i in range(C-1):
-                for j in range(i+1,C):
-                    L = util.L_f(C, i, j) + util.L_f(C, j, i)
-                    Q[k] = _pMp(X, X_inv, K, L).flatten('F')
-                    k += 1
-            for i in range(C-1):
-                for j in range(i+1,C):
-                    L = util.L_f(C, i, j) + util.L_f(C, j, i)
-                    Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
-                    k += 1
-
-            for key in sorted(random_covars.keys()):
-                Z = random_covars[key]
-                Q[k] = _pMp(X, X_inv, Z @ Z.T, np.ones((C,C), dtype='int8')).flatten('F')
-                k += 1
-
-            Q = Q.T
-            Q.flush()
-
-            QTQ = Q.T @ Q
-            QTt = Q.T @ t.flatten()
+        # else:
+        #     log.logger.info('Memmory saving mode')
+        #     Q_shape = (C * (C + 1) + n_random, (N * C) ** 2)
+        #     # use memmap (don't run in parallel)
+        #     tmpfn = util.generate_tmpfn()
+        #     Q = np.memmap(tmpfn, dtype=dtype, mode="w+", shape=Q_shape)
+        #
+        #     k = 0
+        #     for c in range(C):
+        #         L = util.L_f(C, c, c)
+        #         Q[k] = _pMp(X, X_inv, K, L).flatten('F')
+        #         k += 1
+        #     for c in range(C):
+        #         L = util.L_f(C, c, c)
+        #         Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
+        #         k += 1
+        #     for i in range(C-1):
+        #         for j in range(i+1,C):
+        #             L = util.L_f(C, i, j) + util.L_f(C, j, i)
+        #             Q[k] = _pMp(X, X_inv, K, L).flatten('F')
+        #             k += 1
+        #     for i in range(C-1):
+        #         for j in range(i+1,C):
+        #             L = util.L_f(C, i, j) + util.L_f(C, j, i)
+        #             Q[k] = _pMp(X, X_inv, np.eye(N, dtype='int8'), L).flatten('F')
+        #             k += 1
+        #
+        #     for key in sorted(random_covars.keys()):
+        #         Z = random_covars[key]
+        #         Q[k] = _pMp(X, X_inv, Z @ Z.T, np.ones((C,C), dtype='int8')).flatten('F')
+        #         k += 1
+        #
+        #     Q = Q.T
+        #     Q.flush()
+        #
+        #     QTQ = Q.T @ Q
+        #     QTt = Q.T @ t.flatten()
 
     # theta
     theta = linalg.inv(QTQ) @ QTt
@@ -343,7 +365,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
 
 def _reml(model:str, par: list, Y: np.ndarray, K: np.ndarray,
           P: np.ndarray, ctnu: np.ndarray, fixed_covars: dict, random_covars: dict,
-          method: str, nrep: int) -> dict:
+          shared: bool, method: str, nrep: int) -> dict:
     """
     Wrapper for running REML
 
@@ -356,6 +378,7 @@ def _reml(model:str, par: list, Y: np.ndarray, K: np.ndarray,
         ctnu:   cell type-specific noise variance
         fixed_covars:   design matrices for Extra fixed effects
         random_covars:   design matrices for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats when initial optimization failed
     Returns:
@@ -364,7 +387,7 @@ def _reml(model:str, par: list, Y: np.ndarray, K: np.ndarray,
 
     N, C = Y.shape
     y = Y.flatten()
-    X = ctp.get_X( fixed_covars, N, C )
+    X = util.get_X( fixed_covars, N, C, shared=shared )
 
     funs = {
         'hom':  hom_REML_loglike,
@@ -373,7 +396,7 @@ def _reml(model:str, par: list, Y: np.ndarray, K: np.ndarray,
         'full': full_REML_loglike,
     }
     loglike_fun = funs[model]
-    args = (y, K, X, ctnu, random_covars)
+    args = (y, K, X, ctnu, random_covars, shared)
 
     out, opt = util.optim( loglike_fun, par, args, method )
     res = extract( out, model, Y, K, P, ctnu, fixed_covars, random_covars )
@@ -389,7 +412,7 @@ def _reml(model:str, par: list, Y: np.ndarray, K: np.ndarray,
     return res
 
 def hom_REML_loglike(par: list, y: np.ndarray, K: np.ndarray, X: np.ndarray,
-                     ctnu: np.ndarray, random_covars: dict) -> float:
+                     ctnu: np.ndarray, random_covars: dict, shared: bool) -> float:
     """
     Loglikelihood for REML under Hom model
     """
@@ -400,13 +423,16 @@ def hom_REML_loglike(par: list, y: np.ndarray, K: np.ndarray, X: np.ndarray,
     W = np.zeros((C,C))
     r2 = {}
     for i, key in enumerate(sorted(random_covars.keys())):
-        r2[key] = par[2 + i] # TODO: cell type specific or shared random effect
+        if shared:
+            r2[key] = par[2 + i]
+        else:
+            r2[key] = par[(2 + i * C):(2 + i * (C + 1))]
 
     l = LL(y, K, X, ctnu, random_covars, hom_g2, hom_e2, V, W, r2)
     return l
 
 def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray,
-             fixed_covars: dict={}, random_covars: dict={},
+             fixed_covars: dict={}, random_covars: dict={}, shared: bool=True,
              par: list=None, method: str=None, nrep: int=10) -> dict:
     """
     Fit Hom model with REML
@@ -418,6 +444,7 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray,
         ctnu:   cell type-specific noise variance
         fixed_covars:   design matrix for Extra fixed effects
         random_covars:   design matrix for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         par:    initial parameters
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats when initial optimization failed
@@ -429,21 +456,21 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray,
 
     N, C = Y.shape
     y = Y.flatten()
-    n_random = len(random_covars.keys())
-    X = ctp.get_X( fixed_covars, N, C )
+    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
+    X = util.get_X( fixed_covars, N, C, shared=shared )
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
-        hom_g2 = np.var(y - X @ beta) / (2 + n_random)
+        hom_g2 = np.var(y - X @ beta) / (2 + len(random_covars.keys()))
         par = [hom_g2] * (2 + n_random)
 
     res = _reml( 'hom', par, Y, K, P, ctnu, fixed_covars,
-                 random_covars, method, nrep=nrep )
+                 random_covars, shared, method, nrep=nrep )
 
     return res
 
 def freeW_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray,
-                       random_covars: dict) -> float:
+                       random_covars: dict, shared: bool) -> float:
     """
     Loglikelihood function for REML under FreeW model, where env is Free and genetic is Hom
     """
@@ -454,13 +481,16 @@ def freeW_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:
     V = np.zeros((C,C))
     r2 = {}
     for i, key in enumerate(sorted(random_covars.keys())):
-        r2[key] = par[2*C+2+i]
+        if shared:
+            r2[key] = par[C+2+i]
+        else:
+            r2[key] = par[(C + 2 + i * C):(C + 2 + (i+1) * C)]
 
     l = LL(y, K, X, ctnu, random_covars, hom_g2, hom_e2, V, W, r2)
     return l
 
 def freeW_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
-               fixed_covars:dict={}, random_covars:dict={},
+               fixed_covars:dict={}, random_covars:dict={}, shared: bool = True,
                par:list=None, method:str=None, nrep:int=10) -> dict:
     """
     Fit FreeW model using REML, where env is Free and genetic is Hom
@@ -472,6 +502,7 @@ def freeW_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
         ctnu:   cell type-specific noise variance
         fixed_covars:   design matrices for Extra fixed effects
         random_covars:   design matrices for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         par:    initial parameters
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats when initial optimization failed
@@ -483,22 +514,22 @@ def freeW_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
 
     N, C = Y.shape
     y = Y.flatten()
-    X = ctp.get_X( fixed_covars, N, C )
-    n_random = len(random_covars.keys())
+    X = util.get_X( fixed_covars, N, C, shared=shared )
+    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
     n_par = 2 + 2 * C + X.shape[1] + n_random
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
-        hom_g2 = np.var(y - X @ beta) / (3 + n_random)
-        par = [hom_g2] * (2 + 2*C + n_random)
+        hom_g2 = np.var(y - X @ beta) / (3 + len(random_covars.keys()))
+        par = [hom_g2] * (2 + 2*C + n_random) # TODO: do I need to stardardize design matrix for extra random effect? Need to fix it later
 
     res = _reml('freeW', par, Y, K, P, ctnu, fixed_covars,
-                random_covars, method, nrep=nrep)
+                random_covars, shared, method, nrep=nrep)
 
     return res
 
 def free_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray,
-                      random_covars: dict) -> float:
+                      random_covars: dict, shared: bool) -> float:
     """
     Loglikelihood function for REML under Free model
     """
@@ -509,13 +540,18 @@ def free_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:n
     W = np.diag(par[(C+2):(2*C+2)])
     r2 = {}
     for i, key in enumerate(sorted(random_covars.keys())):
-        r2[key] = par[2*C+2+i]
+        if shared:
+            r2[key] = par[2*C+2+i]
+        else:
+            r2[key] = par[(2*C+2+i*C):(2*C+2+(i+1)*C)]
 
     l = LL(y, K, X, ctnu, random_covars, hom_g2, hom_e2, V, W, r2)
     return l
 
-def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_covars:dict={}, 
-        random_covars:dict={}, par:list=None, method:str=None, nrep:int=10, jk:bool=True) -> Tuple[dict,dict]:
+def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
+              fixed_covars:dict={}, random_covars:dict={}, shared: bool=True,
+              par:list=None, method:str=None, nrep:int=10, jk:bool=True
+              ) -> Tuple[dict,dict]:
     '''
     Fit Free model using REML
 
@@ -526,6 +562,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
         ctnu:   cell type-specific noise variance
         fixed_covars:   design matrices for Extra fixed effects
         random_covars:   design matrices for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         par:    initial parameters
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats when initial optimization failed
@@ -540,17 +577,17 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
 
     N, C = Y.shape
     y = Y.flatten()
-    X = ctp.get_X( fixed_covars, N, C )
-    n_random = len(random_covars.keys())
+    X = util.get_X( fixed_covars, N, C, shared=shared )
+    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
     n_par = 2 + 2 * C + X.shape[1] + n_random
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
-        hom_g2 = np.var(y - X @ beta) / (4 + n_random)
+        hom_g2 = np.var(y - X @ beta) / (4 + len(random_covars.keys()) )
         par = [hom_g2] * (2 + 2*C + n_random)
 
     res = _reml('free', par, Y, K, P, ctnu, fixed_covars,
-                random_covars, method, nrep=nrep)
+                random_covars, shared, method, nrep=nrep)
 
     if jk:
         jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
@@ -559,7 +596,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
                 i, Y, K, ctnu, fixed_covars, random_covars, P)
 
             res_jk = _reml('free', par, Y_jk, K_jk, P_jk, ctnu_jk,
-                    fixed_covars_jk, random_covars_jk, method, nrep=nrep)
+                    fixed_covars_jk, random_covars_jk, shared, method, nrep=nrep)
 
             jacks['ct_beta'].append( res_jk['beta']['ct_beta'] )
             jacks['V'].append( np.diag(res_jk['V']) )
@@ -584,7 +621,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray, fixed_c
     return res, p
 
 def full_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:np.ndarray,
-                      random_covars:dict) -> float:
+                      random_covars:dict, shared:bool) -> float:
     """
     Loglikelihood function for REML under Full model
     """
@@ -600,13 +637,16 @@ def full_REML_loglike(par:list, y:np.ndarray, K:np.ndarray, X:np.ndarray, ctnu:n
     W = W + W.T
     r2 = {}
     for i, key in enumerate(sorted(random_covars.keys())):
-        r2[key] = par[2*ngam+i]
+        if shared:
+            r2[key] = par[2*ngam+i]
+        else:
+            r2[key] = par[(2*ngam+i*C):(2*ngam+(i+1)*C)]
 
     l = LL(y, K, X, ctnu, random_covars, hom_g2, hom_e2, V, W, r2)
     return l
 
 def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
-              fixed_covars:dict={}, random_covars:dict={},
+              fixed_covars:dict={}, random_covars:dict={}, shared:bool=True,
               par:list=None, method:str=None, nrep:int=10) -> dict:
     """
     Fit Full model using REML
@@ -618,6 +658,7 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
         ctnu:   cell type-specific noise variance
         fixed_covars:   design matrices for Extra fixed effects
         random_covars:   design matrices for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         par:    initial parameters
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats when initial optimization failed
@@ -630,26 +671,27 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
     N, C = Y.shape
     ngam = C*(C+1) // 2
     y = Y.flatten()
-    X = ctp.get_X( fixed_covars, N, C )
-    n_random = len(random_covars.keys())
+    X = util.get_X( fixed_covars, N, C, shared=shared )
+    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
         hom_g2 = np.var(y - X @ beta) / 2
         V = W = np.diag(np.ones(C))[np.tril_indices(C)] * hom_g2
-        par = list(V) + list(W) + [hom_g2]*n_random
+        par = list(V) + list(W) + [hom_g2] * n_random
 
-    res = _reml('full', par, Y, K, P, ctnu, fixed_covars, random_covars,
+    res = _reml('full', par, Y, K, P, ctnu, fixed_covars, random_covars, shared,
                 method, nrep=nrep)
 
     return res
 
 def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
-        random_covars: dict={}, output_beta: bool=True, dtype:str = None) -> dict:
+        random_covars: dict={}, shared: bool=False, output_beta: bool=True,
+        dtype:str = None) -> dict:
     N, C = Y.shape
-    X = util.get_X(fixed_covars, N, C)
+    X = util.get_X(fixed_covars, N, C, shared=shared)
 
-    theta = he_ols(Y, K, X, ctnu, 'free', random_covars, dtype=dtype)
+    theta = he_ols(Y, K, X, ctnu, 'free', random_covars, shared=shared, dtype=dtype)
     hom_g2, hom_e2 = theta[0], theta[1]
     V, W = np.diag(theta[2:(C+2)]), np.diag(theta[(C+2):(C*2+2)])
 
@@ -668,7 +710,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
         Vy = cal_Vy( hom_g2, hom_e2, V, W, r2, K, ctnu, random_covars )
         beta = util.glse( Vy, X, Y.flatten() )
         # calculate variance of fixed and random effects, and convert to dict
-        beta, fixed_vars = util.cal_variance(beta, P, fixed_covars, {}, {})[:2] # TODO: need to add random effects
+        beta, fixed_vars = util.cal_variance(beta, P, fixed_covars, r2, random_covars)[:2]
         
         out['beta'] = beta
         out['fixed_vars'] = fixed_vars
@@ -676,7 +718,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixe
     return out
 
 def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
-        random_covars: dict={}, jk: bool=True, dtype: str=None) -> Tuple[dict, dict]:
+        random_covars: dict={}, shared: bool=True, jk: bool=True, dtype: str=None) -> Tuple[dict, dict]:
     """
     Fitting Free model with HE
 
@@ -686,7 +728,8 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         ctnu: cell type-specific noise variance (no header no index)
         P:    cell type proportions
         fixed_covars:   design matrices for Extra fixed effects
-        random_covars:  design matrices for Extra random covars
+        random_covars:  design matrices for Extra random effects
+        shared: whether Extra fixed and random effects are shared across cell types
         jk: perform jackknife
         dtype:  data type for he_ols, e.g. float32
 
@@ -699,12 +742,13 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     log.logger.info('Fitting Free model with HE')
 
     N, C = Y.shape 
-    X = util.get_X(fixed_covars, N, C)
-    n_random = len(random_covars.keys())
+    X = util.get_X(fixed_covars, N, C, shared=shared)
+    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
     n_par = 2 + 2 * C + X.shape[1] + n_random
 
-    out = _free_he(Y, K, ctnu, P, fixed_covars, random_covars=random_covars, output_beta=False, dtype=dtype)
-    out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1) 
+    out = _free_he(Y, K, ctnu, P, fixed_covars, random_covars=random_covars,
+                   shared=shared, output_beta=False, dtype=dtype)
+    out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1)
     log.logger.info(out['nu'].dtype)
 
     # jackknife
@@ -714,7 +758,8 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         jacks = {'V':[], 'W':[], 'VW':[]}
         for i in range(N):
             Y_jk, K_jk, ctnu_jk, fixed_covars_jk, random_covars_jk, P_jk = util.jk_rmInd(i, Y, K, ctnu, fixed_covars, random_covars, P=P)
-            out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk, random_covars_jk, output_beta=False, dtype=dtype )
+            out_jk = _free_he( Y_jk, K_jk, ctnu_jk, P_jk, fixed_covars_jk,
+                               random_covars_jk, shared, output_beta=False, dtype=dtype )
 
             #jacks['ct_beta'].append( out_jk['beta']['ct_beta'] )
             jacks['V'].append( np.diag(out_jk['V']) )
@@ -737,7 +782,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     return out, p
 
 def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
-        random_covars: dict={}, dtype:str=None) -> dict:
+        random_covars: dict={}, shared:bool=True, dtype:str=None) -> dict:
     """
     Fitting Full model with HE
 
@@ -748,6 +793,7 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         P:    cell type proportions
         fixed_covars:   design matrices for Extra fixed effects
         random_covars:  design matrices for Extra random covars
+        shared: whether Extra fixed and random effects are shared across cell types
         dtype:  data type for computation in he_ols, e.g. float32
 
     Returns:
@@ -758,9 +804,10 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
 
     N, C = Y.shape 
     ntril = (C-1) * C // 2
-    X = ctp.get_X(fixed_covars, N, C)
+    X = util.get_X(fixed_covars, N, C, shared=shared)
 
-    theta = he_ols(Y, K, X, ctnu, 'full', random_covars=random_covars, dtype=dtype)
+    theta = he_ols(Y, K, X, ctnu, 'full', random_covars=random_covars,
+                   shared=shared, dtype=dtype)
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
     V[np.triu_indices(C,k=1)] = theta[(C*2):(C*2 + ntril)]
     V = V + V.T - np.diag(theta[:C])
