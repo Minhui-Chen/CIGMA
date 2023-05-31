@@ -875,7 +875,7 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str=
     return nsnp
 
 def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Series=None, 
-        con: pd.Series=None) -> dict:
+        con: pd.Series=None, drop_first: bool=True) -> dict:
     """
     Construct design matrix
 
@@ -885,6 +885,7 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
         PC: number to PC to adjust
         cat:    series of category elements e.g. sex: male and female
         con:    series of continuous elements e.g. age
+        drop_first: drop the first column
 
     Returns:
         a design matrix
@@ -895,7 +896,7 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
         pcs = [f'PC{i}' for i in range(1, int(PC)+1)]
         return pca.loc[inds, pcs].to_numpy()
     elif cat is not None:
-        return pd.get_dummies(cat, drop_first=True).loc[inds, :].to_numpy()
+        return pd.get_dummies(cat, drop_first=drop_first).loc[inds, :].to_numpy()
     elif con is not None:
         return con[inds].to_numpy()
 
