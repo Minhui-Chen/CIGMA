@@ -38,7 +38,7 @@ def main():
             'age': util.design(inds, cat=util.age_group(meta['age']))
             }
     random_covars = {
-            'batch': util.design(inds, cat=meta['pool'])
+            'batch': util.design(inds, cat=meta['pool'], drop_first=False) # TODO: rerun HE
             }
 
     # run
