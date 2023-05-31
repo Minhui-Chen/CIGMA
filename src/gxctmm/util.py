@@ -373,10 +373,18 @@ def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
     beta_d = { 'ct_beta': beta_l[:C] }
     beta_l = beta_l[C:]
 
-    if len(beta_l) == len(fixed_covars.keys()):
+    n = 0
+    for value in fixed_covars.values():
+        if len(value.shape) == 1:
+            n += 1
+        else:
+            n += value.shape[1]
+
+    if len(beta_l) == n:
         shared = True
-    else:
+    elif len(beta_l) == (n*C):
         shared = False
+    log.logger.info(f'{len(beta_l)}, {n}')
 
     for key in sorted(fixed_covars.keys()):
         x = fixed_covars[key]

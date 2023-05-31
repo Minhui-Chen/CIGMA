@@ -155,8 +155,12 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
         r2 = _get_r2(out['x'][(2*ngam):], random_covars, C)
 
     # beta
+    if isinstance(list(r2.values())[0], float):
+        shared = True
+    else:
+        shared = False
     y = Y.flatten()
-    X = util.get_X( fixed_covars, N, C, shared=False )
+    X = util.get_X( fixed_covars, N, C, shared=shared )
 
     Vy = cal_Vy( hom_g2, hom_e2, V, W, r2, K, ctnu, random_covars )
     beta = util.glse( Vy, X, y )
