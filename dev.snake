@@ -1,3 +1,5 @@
+reml_ss_cut = 1000
+
 def sim_agg_he_truebeta_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('analysis/sim/{{model}}/{params}/celltypebeta.txt', params=subspace.instance_patterns)
@@ -11,15 +13,18 @@ def sim_agg_he_trueW_subspace(wildcards):
     return expand('analysis/sim/{{model}}/{params}/W.txt', params=subspace.instance_patterns)
 
 def sim_agg_reml_truebeta_subspace(wildcards):
-    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) 
+        & (sim_params['ss'].astype('float') <= reml_ss_cut)])
     return expand('analysis/sim/{{model}}/{params}/celltypebeta.txt', params=subspace.instance_patterns)
 
 def sim_agg_reml_trueV_subspace(wildcards):
-    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) 
+        & (sim_params['ss'].astype('float') <= reml_ss_cut)])
     return expand('analysis/sim/{{model}}/{params}/V.txt', params=subspace.instance_patterns)
 
 def sim_agg_reml_trueW_subspace(wildcards):
-    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) 
+        & (sim_params['ss'].astype('float') <= reml_ss_cut)])
     return expand('analysis/sim/{{model}}/{params}/W.txt', params=subspace.instance_patterns)
 
 def sim_agg_out_subspace(wildcards):
@@ -31,7 +36,8 @@ def sim_agg_he_out_subspace(wildcards):
     return expand('analysis/sim/{{model}}/{params}/out.he.npy', params=subspace.instance_patterns)
 
 def sim_agg_reml_out_subspace(wildcards):
-    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)])
+    subspace = get_subspace(wildcards.arg, sim_params.loc[(sim_params['model']==wildcards.model) 
+        & (sim_params['ss'].astype('float') <= reml_ss_cut)])
     return expand('analysis/sim/{{model}}/{params}/out.reml.npy', params=subspace.instance_patterns)
 
 rule sim_HEestimates_subspace_plot:
@@ -73,7 +79,8 @@ rule sim_REMLestimates_subspace_plot:
         png = 'results/sim/{model}/REML.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
-                sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)]).iloc[:,:],
+                sim_params.loc[(sim_params['model']==wildcards.model) 
+                    & (sim_params['ss'].astype('float') <= reml_ss_cut)]).iloc[:,:],
         sim_plot_order = sim_plot_order,
         method = None,
         colorpalette = colorpalette,
@@ -88,7 +95,8 @@ rule sim_REMLwaldNlrt_subspace_plot:
         png = 'results/sim/{model}/REML.waldNlrt.AGG{arg}.png',
     params:
         subspace = lambda wildcards: get_subspace(wildcards.arg,
-                sim_params.loc[(sim_params['model']==wildcards.model) & (sim_params['ss'].astype('float')<300)]).iloc[:,:],
+                sim_params.loc[(sim_params['model']==wildcards.model) 
+                    & (sim_params['ss'].astype('float') <= reml_ss_cut)]).iloc[:,:],
         sim_plot_order = sim_plot_order,
         mycolors = mycolors,
     script: 'scripts/sim/REMLwaldNlrt_subspace_plot.py'
@@ -115,6 +123,43 @@ rule sim_AGGarg:
 rule sim_all:
     input:
         flag = expand('staging/sim/{model}/all.flag', model=['free','freeW','full']),
+
+################## 1.2 HE without JK ############
+rule sim_HE_noJK:
+    input:
+        Y = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/Y.batch{{i}}.txt',
+        K = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/K.batch{{i}}.txt',
+        ctnu = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/ctnu.batch{{i}}.txt',
+        P = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/P.batch{{i}}.txt',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.noJK.batch{{i}}',
+    params:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/rep/he.noJK.npy',
+        batches = lambda wildcards: sim_batches[int(wildcards.i)],
+    resources:
+        time = '10:00:00',
+        mem_mb = lambda wildcards: f'{max(1,int(float(wildcards.ss))//150)}G',
+    priority: 1
+    script: 'scripts/sim/he.py'
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_HE_noJK with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.noJK.batch{i}'
+                for i in range(sim_batch_no)],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.he.noJK.npy',
+
+def sim_agg_he_noJK_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('staging/sim/{{model}}/{params}/out.he.noJK.npy', params=subspace.instance_patterns)
+
+use rule sim_HEestimates_subspace_plot as sim_HE_noJK_estimates_subspace_plot with:
+    input:
+        out = sim_agg_he_noJK_out_subspace,
+        V = sim_agg_he_trueV_subspace,
+        W = sim_agg_he_trueW_subspace,
+    output:
+        png = 'results/sim/{model}/HE.noJK.AGG{arg}.png',
 
 ########################################################################
 # Real data
@@ -237,7 +282,7 @@ rule yazar_impute_ctp_s2:
     script: 'bin/yazar/impute.R'
 
 
-# gcta
+############################ 1.2 gcta ###################################
 rule yazar_gcta_grm:
     input:
         genes = 'data/Yazar2022Science/gene_loation.txt',
@@ -311,21 +356,36 @@ rule yazar_gcta_grm:
 #                            h2 = line.strip().split()[1]
 #                            break
 #                    f.write(f'{gene}\t{h2}\n')
-            
+
+kinship_batches = 500
+rule yazar_gcta_split_kinship:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.chr{chr}.txt'
+                for chr in range(1,23)],
+    output:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.batch{i}.txt'
+                for i in range(kinship_batches)],
+    run:
+        kinship = [pd.read_table(f) for f in input.kinship]
+        kinship = pd.concat(kinship, axis=0, ignore_index=True)
+        indexs = np.array_split(kinship.index, len(output.kinship))
+        for index, f in zip(indexs, output.kinship):
+            kinship.loc[index].to_csv(f, sep='\t', index=False)
+
 rule yazar_gcta_greml_op:
     input:
         op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.mvn.gz',
-        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.chr{{chr}}.txt',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.batch{{i}}.txt',
         op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
         geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
         obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
     output:
-        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.chr{{chr}}',
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.batch{{i}}',
     params:
         out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/rep/op.hsq',
         snps = 5, # threshold of snp number per gene
     resources:
-        time = '10:00:00',
+        time = '200:00:00',
         mem_mb = '2G',
     shell:
         '''
@@ -338,8 +398,8 @@ rule yazar_gcta_greml_op:
 
 rule yazar_gcta_greml_op_merge:
     input:
-        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.chr{chr}'
-                for chr in range(1,23)],
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.batch{i}'
+                for i in range(kinship_batches)],
     output:
         out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml',
     run:
@@ -353,3 +413,291 @@ rule yazar_gcta_greml_op_merge:
                             h2 = line.strip().split()[1]
                             break
                     f.write(f'{gene}\t{h2}\n')
+
+rule yazar_gcta_greml_op_plot:
+    input:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml',
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml.png',
+    script: 'scripts/yazar/gcta_op_plot.py'
+
+rule yazar_gcta_greml_ctp:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.batch{{i}}.txt',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml.batch{{i}}',
+    params:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/rep/ctp.hsq',
+        snps = 5, # threshold of snp number per gene
+    resources:
+        time = '200:00:00',
+        mem_mb = '2G',
+    shell:
+        '''
+        module load gcc/11.3.0 gcta/1.94.1
+        python3 scripts/yazar/gcta_greml_ctp.py \
+                {input.ctp} {input.kinship} \
+                {input.op_pca} {input.geno_pca} \
+                {input.obs} {params.snps} {params.out} {output.out}
+        '''
+
+rule yazar_gcta_greml_ctp_merge:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml.batch{i}'
+                for i in range(kinship_batches)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml',
+    run:
+        with open(output.out, 'w') as f:
+            f.write('ct\tgene\th2\n')
+            for chr_out in input.out:
+                for gene_out in open(chr_out):
+                    gene_ct = re.search(r"/(ENSG[^/]+)/", gene_out).group(1)
+                    gene, ct = gene_ct.split('_')
+                    for line in open(gene_out.strip()):
+                        if re.search(r'V\(G\)\/Vp', line):
+                            h2 = line.strip().split()[1]
+                            break
+                    f.write(f'{ct}\t{gene}\t{h2}\n')
+
+rule yazar_gcta_greml_ctp_plot:
+    input:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml',
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml.png',
+    script: 'scripts/yazar/gcta_ctp_plot.py'
+
+rule yazar_gcta_all:
+    input:
+        op = expand('results/yazar/{params}/gcta/op.greml.png',
+                params=yazar_paramspace.instance_patterns),
+        ctp = expand('results/yazar/{params}/gcta/ctp.greml.png',
+                params=yazar_paramspace.instance_patterns),
+
+####################### 1.2: combine all cts together except for one  ######################
+combine_cts = {
+        'cc1':  {
+            'B': ['B IN', 'B Mem'],
+            'CD4': ['CD4 ET', 'CD4 NC'],
+            'CD8': ['CD8 ET', 'CD8 NC', 'CD8 S100B'],
+            },
+
+        'cc2':  {
+            'main':  ['B IN', 'B Mem', 'CD4 ET', 'CD4 NC', 'CD8 ET', 'CD8 NC', 'CD8 S100B'],
+            }
+        }
+
+wildcard_constraints: cc='[\w\d]+'
+
+rule yazar_combine_cts:
+    input:
+        obs = 'staging/data/yazar/obs.gz',
+    output:
+        obs = 'staging/data/yazar/combine_cts/{cc}/obs.gz',
+    params:
+        cc = lambda wildcards: combine_cts[wildcards.cc],
+    run:
+        obs = pd.read_table(input.obs)
+        for key, value in params.cc.items():
+            obs.loc[obs['cell_label'].isin(value), 'cell_label'] = key
+        obs.to_csv(output.obs, sep='\t', index=False)
+
+use rule yazar_ctp as yazar_cc_ctp with:
+    input:
+        X = 'staging/data/yazar/X.npz',
+        obs = 'staging/data/yazar/combine_cts/{cc}/obs.gz',
+        var = 'staging/data/yazar/var.gz',
+    output:
+        ctp = 'staging/yazar/combine_cts/{cc}/ctp.gz',
+        ctnu = 'staging/yazar/combine_cts/{cc}/ctnu.gz',
+        P = 'staging/yazar/combine_cts/{cc}/P.gz',
+        n = 'staging/yazar/combine_cts/{cc}/n.gz',
+
+use rule yazar_rm_rareINDnCT as yazar_cc_rm_rareINDnCT with:
+    input:
+        ctp = 'staging/yazar/combine_cts/{cc}/ctp.gz',
+        ctnu = 'staging/yazar/combine_cts/{cc}/ctnu.gz',
+        n = 'staging/yazar/combine_cts/{cc}/n.gz',
+    output:
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.gz',
+        ctnu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctnu.gz',
+        P = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/P.gz',
+        n = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/n.gz',
+
+use rule yazar_mvn_ctp as yazar_cc_mvn_ctp with:
+    input:
+        data = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.gz',
+    output:
+        data = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+
+use rule yazar_mvn_ctp as yazar_cc_mvn_ctnu with:
+    input:
+        data = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctnu.gz',
+    output:
+        data = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
+
+use rule yazar_std_op as yazar_cc_std_op with:
+    input:
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.mvn.gz',
+        ctnu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctnu.mvn.gz',
+        P = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/P.gz',
+    output:
+        op = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/op.std.gz',
+        nu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/nu.std.gz',
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.std.gz',
+        ctnu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctnu.std.gz',
+
+use rule yazar_op_pca as yazar_cc_op_pca with:
+    input:
+        op = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/op.std.gz',
+    output:
+        evec = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/evec.txt',
+        eval = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/eval.txt',
+        pca = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        png = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/pca.png',
+
+use rule yazar_HE_split as yazar_cc_HE_split with:
+    input:
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.std.gz',
+        ctnu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctnu.std.gz',
+    output:
+        ctp = [f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        ctnu = [f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+
+use rule yazar_HE_free as yazar_cc_HE_free with:
+    input:
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        P = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/P.gz',
+        op_pca = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'staging/data/yazar/combine_cts/{cc}/obs.gz',
+    output:
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he.free.batch{{i}}',
+    params:
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/rep/he.free.npy',
+        snps = 5, # threshold of snp number per gene
+
+use rule yazar_HE_free_merge as yazar_cc_HE_free_merge with:
+    input:
+        out = [f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he.free.batch{i}'
+                for i in range(yazar_he_batches)],
+    output:
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he.free.npy',
+
+use rule yazar_HE_Free_plot as yazar_cc_HE_Free_plot with:
+    input:
+        P = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/P.gz',
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he.free.npy',
+    output:
+        h2 = f'results/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he.free.h2.png',
+
+rule yazar_cc_all:
+    input:
+        h2 = expand('results/yazar/combine_cts/{cc}/{params}/he.free.h2.png', 
+                cc=list(combine_cts.keys()), 
+                params=yazar_paramspace.instance_patterns),
+
+##################### 1.2.3 gcta ##################################
+use rule yazar_gcta_greml_ctp as yazar_cc_gcta_greml_ctp with:
+    input:
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/ctp.std.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.batch{{i}}.txt',
+        op_pca = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'staging/data/yazar/combine_cts/{cc}/obs.gz',
+    output:
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml.batch{{i}}',
+
+use rule yazar_gcta_greml_ctp_merge as yazar_cc_gcta_greml_ctp_merge with:
+    input:
+        out = [f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml.batch{i}'
+                for i in range(kinship_batches)],
+    output:
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml',
+
+use rule yazar_gcta_greml_ctp_plot as yazar_cc_gcta_greml_ctp_plot with:
+    input:
+        out = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml',
+    output:
+        png = f'results/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/gcta/ctp.greml.png',
+
+rule yazar_cc_gcta_all:
+    input:
+        png = expand('results/yazar/combine_cts/{cc}/{params}/gcta/ctp.greml.png',
+                cc=list(combine_cts.keys()), 
+                params=yazar_paramspace.instance_patterns),
+
+##################### 1.2 get rid of ctnu ##########################
+rule yazar_ccNOctnu_HE_free:
+    input:
+        ctp = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        P = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/P.gz',
+        op_pca = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'staging/data/yazar/combine_cts/{cc}/obs.gz',
+    output:
+        out = f'staging/yazar/combine_cts/{{cc}}/noctnu/{yazar_paramspace.wildcard_pattern}/he.free.batch{{i}}',
+    params:
+        out = f'staging/yazar/combine_cts/{{cc}}/noctnu/{yazar_paramspace.wildcard_pattern}/rep/he.free.npy',
+        snps = 5, # threshold of snp number per gene
+    script: 'scripts/yazar/he.free.ccNOctnu.py'
+
+use rule yazar_HE_free_merge as yazar_ccNOctnu_HE_free_merge with:
+    input:
+        out = [f'staging/yazar/combine_cts/{{cc}}/noctnu/{yazar_paramspace.wildcard_pattern}/he.free.batch{i}'
+                for i in range(yazar_he_batches)],
+    output:
+        out = f'staging/yazar/combine_cts/{{cc}}/noctnu/{yazar_paramspace.wildcard_pattern}/he.free.npy',
+
+use rule yazar_HE_Free_plot as yazar_ccNOctnu_HE_Free_plot with:
+    input:
+        P = f'staging/yazar/combine_cts/{{cc}}/{yazar_paramspace.wildcard_pattern}/P.gz',
+        out = f'staging/yazar/combine_cts/{{cc}}/noctnu/{yazar_paramspace.wildcard_pattern}/he.free.npy',
+    output:
+        h2 = f'results/yazar/combine_cts/{{cc}}/noctnu/{yazar_paramspace.wildcard_pattern}/he.free.h2.png',
+
+rule yazar_ccNOctnu_all:
+    input:
+        h2 = expand('results/yazar/combine_cts/{cc}/noctnu/{params}/he.free.h2.png', 
+                cc=list(combine_cts.keys()), 
+                params=yazar_paramspace.instance_patterns),
+
+
+########### 1.2 correct for P cell type proportions (not implemented) ################
+#rule yazar_HE_free_adjP:
+#    input:
+#        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+#        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+#        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+#        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+#        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+#        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+#        obs = 'staging/data/yazar/obs.gz',
+#    output:
+#        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.adjP.batch{{i}}',
+#    params:
+#        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/rep/he.free.adjP.npy',
+#        snps = 5, # threshold of snp number per gene
+#    resources:
+#        time = '10:00:00',
+#        mem_mb = '20G',
+#    script: 'scripts/yazar/he.free.adjP.py'
+#
+#use rule yazar_HE_free_merge as yazar_HE_free_merge_adjP with:
+#    input:
+#        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.adjP.batch{i}'
+#            for i in range(yazar_he_batches)],
+#    output:
+#        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.adjP.npy',
+
+

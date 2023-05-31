@@ -1,10 +1,11 @@
-import os
+import os, re
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plot_help, subspace_plot
+from gxctmm import plot
 
 def read_hom( res, arg ):
     '''
@@ -155,6 +156,7 @@ def plot_free(data, C, true_hom_g2s, true_hom_e2s, true_V, true_W, true_h2,
 
     # V
     V_df = pd.melt(data, id_vars=['arg'], value_vars=['V_'+str(i+1) for i in range(C)])
+    V_df['value'] = plot._clip(V_df['value'], cut=3)
     sns.boxplot(x='arg', y='value', hue='variable', data=V_df, ax=axes[1,0], palette=colorpalette)
     ## add true V
     V_diag = np.array([np.diag(true_V[x]) for x in pd.unique(V_df['arg'])]).flatten()
@@ -168,6 +170,7 @@ def plot_free(data, C, true_hom_g2s, true_hom_e2s, true_V, true_W, true_h2,
 
     # W
     W_df =  pd.melt(data, id_vars=['arg'], value_vars=['W_'+str(i+1) for i in range(C)])
+    W_df['value'] = plot._clip(W_df['value'], cut=3)
     sns.boxplot(x='arg', y='value', hue='variable', data=W_df, ax=axes[1,1], palette=colorpalette)
     ## add true W
     W_diag = np.array([np.diag(true_W[x]) for x in pd.unique(W_df['arg'])]).flatten()
@@ -181,6 +184,7 @@ def plot_free(data, C, true_hom_g2s, true_hom_e2s, true_V, true_W, true_h2,
 
     # h2
     h2_df =  pd.melt(data, id_vars=['arg'], value_vars=['h2_'+str(i+1) for i in range(C)])
+    h2_df['value'] = h2_df['value'].clip(-1,1)
     sns.boxplot(x='arg', y='value', hue='variable', data=h2_df, ax=axes[1,2], palette=colorpalette)
     ## add true h2
     h2_diag = np.array([np.diag(true_h2[x]) for x in pd.unique(h2_df['arg'])]).flatten()
@@ -238,11 +242,11 @@ def main():
     # 
     os.makedirs( os.path.dirname(snakemake.output.png), exist_ok=True )
     subspace = snakemake.params.subspace 
-    sim_plot_order = snakemake.params.sim_plot_order 
+    sim_plot_order = snakemake.params.sim_plot_order
     method = snakemake.params.method
     mycolors = snakemake.params.mycolors 
     pointcolor = snakemake.params.pointcolor
-    colorpalette = snakemake.params.colorpalette 
+    colorpalette = snakemake.params.colorpalette
 
     # get cell type number
     out = np.load(snakemake.input.out[0], allow_pickle=True).item()
@@ -262,7 +266,7 @@ def main():
             sys.exit('Missing C!\n')
 
     # collect plot order
-    plot_order = np.array( sim_plot_order[snakemake.wildcards.model][snakemake.wildcards.arg] )
+    plot_order = np.array( sim_plot_order[re.sub('\d', '', snakemake.wildcards.model)][snakemake.wildcards.arg] ) # e.g. free3
     args = subspace[snakemake.wildcards.arg]
     if np.any(~args.isin(plot_order)):
         sys.exit('Missing arg in plot_order!\n')

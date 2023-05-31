@@ -48,8 +48,8 @@ wildcard_constraints: model='\w+'
 ##   Simulation
 #########################################################################################
 # par
-sim_replicates = 100
-sim_batch_no = 50
+sim_replicates = 1000
+sim_batch_no = 150
 sim_batches = np.array_split(range(sim_replicates), sim_batch_no)
 
 ## paramspace
@@ -139,7 +139,7 @@ rule sim_HE:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/rep/he.npy',
         batches = lambda wildcards: sim_batches[int(wildcards.i)],
     resources:
-        time = '10:00:00',
+        time = '100:00:00',
         mem_mb = lambda wildcards: f'{max(1,int(float(wildcards.ss))//150)}G',
     priority: 1
     script: 'bin/sim/he.py'
@@ -156,7 +156,7 @@ rule sim_REML:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/rep/reml.npy',
         batches = lambda wildcards: sim_batches[int(wildcards.i)],
     resources:
-        time = '36:00:00',
+        time = '360:00:00',
         mem_mb = lambda wildcards: f'{max(1,int(float(wildcards.ss))//150)}G',
     priority: 1
     script: 'bin/sim/reml.py'
@@ -653,7 +653,7 @@ rule yazar_HE_full:
 rule yazar_HE_full_merge:
     input:
         out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.full.batch{i}'
-            for i in range(5)],
+            for i in range(yazar_he_batches)],
     output:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.full.npy',
     script: 'bin/mergeBatches.py'
@@ -689,13 +689,12 @@ rule yazar_HE_free:
 rule yazar_HE_free_merge:
     input:
         out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.batch{i}'
-            for i in range(5)],
+            for i in range(yazar_he_batches)],
     output:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.npy',
     script: 'bin/mergeBatches.py'
 
 rule yazar_HE_Free_plot:
-    # the script is for Full model
     input:
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.npy',

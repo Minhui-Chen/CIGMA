@@ -31,18 +31,20 @@ def main():
 
         if snakemake.wildcards.model != 'full':
             # fit hom
-            hom = fit.hom_REML(Y, K, P, ctnu, method='BFGS-Nelder')
+            #hom = fit.hom_REML(Y, K, P, ctnu, method='BFGS-Nelder')
             # fit freeW
-            freeW = fit.freeW_REML(Y, K, P, ctnu, method='BFGS-Nelder')
+            #freeW = fit.freeW_REML(Y, K, P, ctnu, method='BFGS-Nelder')
             # fit free
             free, free_p = fit.free_REML(Y, K, P, ctnu, method='BFGS-Nelder', jk=False)
 
             # LRT
-            free_freeW = util.lrt(free['opt']['l'], freeW['opt']['l'], k=C)
-            free_hom = util.lrt(free['opt']['l'], hom['opt']['l'], k=2*C)
+            #free_freeW = util.lrt(free['opt']['l'], freeW['opt']['l'], k=C)
+            #free_hom = util.lrt(free['opt']['l'], hom['opt']['l'], k=2*C)
 
-            out = { 'hom': hom, 'free':freeW, 'free':free, 'wald':free_p,
-                    'lrt': {'free_freeW':free_freeW, 'free_hom':free_hom}   }
+            out = { 'free':free, 'wald':free_p }
+
+            #out = { 'hom': hom, 'free':freeW, 'free':free, 'wald':free_p,
+                    #'lrt': {'free_freeW':free_freeW, 'free_hom':free_hom}   }
         else:
             # fit full
             full = fit.full_REML(Y, K, P, ctnu, method='BFGS-Nelder', nrep=2)
