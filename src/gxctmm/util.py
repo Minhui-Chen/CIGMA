@@ -12,6 +12,31 @@ from numpy.random import default_rng
 from ctmm import wald
 from . import log
 
+def get_X(fixed_covars: dict, N: int, C: int, shared: bool=True) -> np.ndarray:
+    """
+    Compute the design matrix X for fixed effects.
+
+    Parameters:
+        fixed_covars:   a dict of design matrices for each feature of fixed effect,
+                        except for cell type-specific fixed effect
+        N:  number of individuals
+        C:  number of cell types
+        shared: whether fixed effect is shared across cell types
+    Returns:
+        Design matrix for fixed effects
+    """
+
+    X = np.kron( np.ones((N,1)), np.eye(C) )
+    for key in np.sort(list(fixed_covars.keys())):
+        m = fixed_covars[key]
+        if len( m.shape ) == 1:
+            m = m.reshape(-1,1)
+        if shared:
+            X = np.concatenate( ( X, np.kron(m, np.ones((C,1)))), axis=1 )
+        else:
+            X = np.concatenate((X, np.kron(m, np.eye(C))), axis=1)
+    return X
+
 def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[int] = None) -> tuple:
     '''
     Read fixed and random effect design matrices
@@ -55,7 +80,11 @@ def age_group(age: pd.Series):
     Separate age groups
     """
     bins = np.arange(25, 91, 5)
-    return pd.Series(np.digitize(age, bins), index=age.index)
+    new = pd.Series(np.digitize(age, bins), index=age.index)
+    if age.name is None:
+        return new
+    else:
+        return new.rename( age.name )
 
 def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, dict]:
     '''
@@ -570,7 +599,6 @@ def generate_tmpfn() -> str:
     tmpfn = tmpf.name
     tmpf.close()
     log.logger.info(tmpfn)
-    print(tmpfn)
     return tmpfn
 
 def subprocess_popen(cmd: list, log_fn: str=None) -> None:
