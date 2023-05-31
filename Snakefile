@@ -702,7 +702,40 @@ rule yazar_HE_Free_plot:
         h2 = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.free.h2.png',
     script: 'bin/yazar/free.plot.py'
 
-rule yazar_HE_clean:
+rule yazar_REML_free:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.txt',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'staging/data/yazar/obs.gz',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.free.batch{{i}}',
+    params:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/rep/reml.free.npy',
+        snps = 5, # threshold of snp number per gene
+    resources:
+        time = '200:00:00',
+        mem_mb = '10G',
+    script: 'bin/yazar/reml.free.py'
+
+use rule yazar_HE_free_merge as yazar_REML_free_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.free.batch{i}'
+            for i in range(yazar_he_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/reml.free.npy',
+
+use rule yazar_HE_Free_plot as yazar_REML_Free_plot with:
+    input:
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/reml.free.npy',
+    output:
+        h2 = f'results/yazar/{yazar_paramspace.wildcard_pattern}/reml.free.h2.png',
+
+rule yazar_clean:
     input:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.full.npy',
         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.txt',
@@ -717,6 +750,7 @@ rule yazar_all:
     input:
         full = expand('results/yazar/{params}/he.full.h2.png', params=yazar_paramspace.instance_patterns),
         free = expand('results/yazar/{params}/he.free.h2.png', params=yazar_paramspace.instance_patterns),
+        reml_free = expand('results/yazar/{params}/reml.free.h2.png', params=yazar_paramspace.instance_patterns),
 
 #######################################################################################
 # Perez 2022 Science
