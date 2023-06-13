@@ -12,7 +12,8 @@ from numpy.random import default_rng
 from ctmm import wald
 from . import log
 
-def get_X(fixed_covars: dict, N: int, C: int, shared: bool=True) -> np.ndarray:
+
+def get_X(fixed_covars: dict, N: int, C: int, shared: bool = True) -> np.ndarray:
     """
     Compute the design matrix X for fixed effects.
 
@@ -26,19 +27,20 @@ def get_X(fixed_covars: dict, N: int, C: int, shared: bool=True) -> np.ndarray:
         Design matrix for fixed effects
     """
 
-    X = np.kron( np.ones((N,1)), np.eye(C) )
+    X = np.kron(np.ones((N, 1)), np.eye(C))
     for key in sorted(fixed_covars.keys()):
         m = fixed_covars[key]
-        if len( m.shape ) == 1:
-            m = m.reshape(-1,1)
+        if len(m.shape) == 1:
+            m = m.reshape(-1, 1)
         if shared:
-            X = np.concatenate( ( X, np.kron(m, np.ones((C,1)))), axis=1 )
+            X = np.concatenate((X, np.kron(m, np.ones((C, 1)))), axis=1)
         else:
             X = np.concatenate((X, np.kron(m, np.eye(C))), axis=1)
     return X
 
+
 def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[int] = None) -> tuple:
-    '''
+    """
     Read fixed and random effect design matrices
 
     Parameters:
@@ -52,28 +54,30 @@ def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[i
             #. dict of design matrices for fixed effects
             #. dict of design matrices for random effects
             #. others
-    '''
+    """
+
     def read(covars):
         tmp = {}
         for key in covars.keys():
             f = covars[key]
-            if isinstance( f, str ):
-                tmp[key] = np.loadtxt( f )
+            if isinstance(f, str):
+                tmp[key] = np.loadtxt(f)
             else:
                 tmp[key] = f
-        return( tmp )
+        return tmp
 
     fixed_covars = read(fixed_covars)
     random_covars = read(random_covars)
-    n_fixed, n_random = len( fixed_covars.keys() ), len( random_covars.keys() )
-    random_keys = list( np.sort( list(random_covars.keys()) ) )
+    n_fixed, n_random = len(fixed_covars.keys()), len(random_covars.keys())
+    random_keys = list(np.sort(list(random_covars.keys())))
     Rs = [random_covars[key] for key in random_keys]
     if C:
-        random_MMT = [np.repeat( np.repeat(R @ R.T, C, axis=0), C, axis=1 ) for R in Rs]
+        random_MMT = [np.repeat(np.repeat(R @ R.T, C, axis=0), C, axis=1) for R in Rs]
     else:
         random_MMT = [R @ R.T for R in Rs]
 
     return fixed_covars, random_covars, n_fixed, n_random, random_keys, Rs, random_MMT
+
 
 def age_group(age: pd.Series):
     """
@@ -84,10 +88,11 @@ def age_group(age: pd.Series):
     if age.name is None:
         return new
     else:
-        return new.rename( age.name )
+        return new.rename(age.name)
+
 
 def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, dict]:
-    '''
+    """
     Optimization use scipy.optimize.minimize
 
     Parameters:
@@ -99,25 +104,26 @@ def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, d
         a tuple of
             #. OptimizeResult object from optimize.minimize
             #. dict of optimization parameters and results
-    '''
+    """
     if method is None:
         method = 'BFGS'
     if method == 'BFGS-Nelder':
-        out1 = optimize.minimize( fun, par, args=args, method='BFGS' )
-        out = optimize.minimize( fun, out1['x'], args=args, method='Nelder-Mead' )
-        opt = {'method1':'BFGS', 'success1':out1['success'], 'status1':out1['status'],
-                'message1':out1['message'], 'l1':out1['fun'] * (-1),
-                'method':'Nelder-Mead', 'success':out['success'], 'status':out['status'],
-                'message':out['message'], 'l':out['fun'] * (-1)}
+        out1 = optimize.minimize(fun, par, args=args, method='BFGS')
+        out = optimize.minimize(fun, out1['x'], args=args, method='Nelder-Mead')
+        opt = {'method1': 'BFGS', 'success1': out1['success'], 'status1': out1['status'],
+               'message1': out1['message'], 'l1': out1['fun'] * (-1),
+               'method': 'Nelder-Mead', 'success': out['success'], 'status': out['status'],
+               'message': out['message'], 'l': out['fun'] * (-1)}
     else:
-        out = optimize.minimize( fun, par, args=args, method=method )
-        opt = {'method':method, 'success':out['success'], 'status':out['status'],
-                'message':out['message'], 'l':out['fun'] * (-1)}
-    return( out, opt )
+        out = optimize.minimize(fun, par, args=args, method=method)
+        opt = {'method': method, 'success': out['success'], 'status': out['status'],
+               'message': out['message'], 'l': out['fun'] * (-1)}
+    return out, opt
 
-def check_optim(opt: dict, hom_g2: float, hom_e2: float, ct_overall_g_var: float, ct_overall_e_var: float, 
-        fixed_vars: dict, random_vars: dict={}, cut: float=5) -> bool:
-    '''
+
+def check_optim(opt: dict, hom_g2: float, hom_e2: float, ct_overall_g_var: float, ct_overall_e_var: float,
+                fixed_vars: dict, random_vars: dict = {}, cut: float = 5) -> bool:
+    """
     Check whether optimization converged successfully
 
     Parameters:
@@ -132,17 +138,26 @@ def check_optim(opt: dict, hom_g2: float, hom_e2: float, ct_overall_g_var: float
     Returns:
         True:   optim failed to converge
         False:  optim successfully to converge
-    '''
-    if ( (opt['l'] < -1e10) or (not opt['success']) or (hom_g2 > cut) or (hom_e2 > cut) or 
+    """
+    if ((opt['l'] < -1e10) or (not opt['success']) or (hom_g2 > cut) or (hom_e2 > cut) or
             (ct_overall_g_var > cut) or (ct_overall_e_var > cut) or
             np.any(np.array(list(fixed_vars.values())) > cut) or
-            np.any(np.array(list(random_vars.values())) > cut) ):
+            np.any(np.array(list(random_vars.values())) > cut)):
+        log.logger.info(
+            f"l:{opt['l']}, {opt['success']}, message: {opt['message']}, hom_g2: {hom_g2}, hom_e2: {hom_e2} \n"
+            f"overall cell type-specific genetic effect: {ct_overall_g_var} \n"
+            f"overall cell type-specific env effect: {ct_overall_e_var} \n"
+            f"cell type-specific fixed effect: {fixed_vars['ct_beta']}")
+        if 'success1' in opt.keys():
+            log.logger.info(f"{opt['success1']}: {opt['message1']}")
         return True
     else:
         return False
 
-def re_optim(out: object, opt: dict, fun: callable, par: list, args: tuple, method: str, nrep: int=10) -> Tuple[object, dict]:
-    '''
+
+def re_optim(out: object, opt: dict, fun: callable, par: list, args: tuple, method: str, nrep: int = 10) -> Tuple[
+    object, dict]:
+    """
     Rerun optimization
 
     Parameters:
@@ -154,113 +169,116 @@ def re_optim(out: object, opt: dict, fun: callable, par: list, args: tuple, meth
         method: optimization method, e.g. BFGS
         nrep:   number of optimization repeats
     Returns:
-        a tuple of 
+        a tuple of
             #. OptimizeResult of the best optimization
             #. results of the best optimization
-    '''
+    """
     rng = default_rng()
-    #print( out['fun'] )
+    # print( out['fun'] )
     for i in range(nrep):
-        par_ = np.array(par) * rng.gamma(2,1/2,len(par))
+        par_ = np.array(par) * rng.gamma(2, 1 / 2, len(par))
         out_, opt_ = optim(fun, par_, args=args, method=method)
-        log.logger.info( f"-loglike: {out_['fun']}" )
+        log.logger.info(f"-loglike: {out_['fun']}")
         if (not out['success']) and out_['success']:
             out, opt = out_, opt_
         elif (out['success'] == out_['success']) and (out['fun'] > out_['fun']):
             out, opt = out_, opt_
-    #print( out['fun'] )
-    return( out, opt )
+    # print( out['fun'] )
+    return out, opt
 
-def dict2Rlist( X: dict ) -> object:
-    '''
+
+def dict2Rlist(X: dict) -> object:
+    """
     Transform a python dictionary to R list
 
     Parameters:
         X:  python dictionary
     Returns:
         R list
-    '''
-    if len( X.keys() ) == 0:
-        return( r('NULL') )
+    """
+    if len(X.keys()) == 0:
+        return r('NULL')
     else:
-        keys = np.sort( list(X.keys()) )
-        rlist = ro.ListVector.from_length( len(keys) )
-        for i in range( len(keys) ):
+        keys = np.sort(list(X.keys()))
+        rlist = ro.ListVector.from_length(len(keys))
+        for i in range(len(keys)):
             if isinstance(X[keys[i]], str):
-                if os.path.exists( X[keys[i]] ):
-                    rlist[i] = r['as.matrix']( r['read.table'](X[keys[i]]) )
+                if os.path.exists(X[keys[i]]):
+                    rlist[i] = r['as.matrix'](r['read.table'](X[keys[i]]))
                 else:
                     try:
-                        rlist[i] = np.array( [X[keys[i]]] )
+                        rlist[i] = np.array([X[keys[i]]])
                     except:
                         numpy2ri.activate()
-                        rlist[i] = np.array( [X[keys[i]]] )
-                        numpy2ri.deactivate() # deactivate would cause numpy2ri deactivated in calling fun
+                        rlist[i] = np.array([X[keys[i]]])
+                        numpy2ri.deactivate()  # deactivate would cause numpy2ri deactivated in calling fun
             elif isinstance(X[keys[i]], pd.DataFrame):
                 with localconverter(ro.default_converter + pandas2ri.converter):
-                    rlist[i] = r['as.matrix']( X[keys[i]] )
+                    rlist[i] = r['as.matrix'](X[keys[i]])
             elif isinstance(X[keys[i]], np.ndarray):
                 try:
-                    rlist[i] = r['as.matrix']( X[keys[i]] )
+                    rlist[i] = r['as.matrix'](X[keys[i]])
                 except:
                     numpy2ri.activate()
-                    rlist[i] = r['as.matrix']( X[keys[i]] )
+                    rlist[i] = r['as.matrix'](X[keys[i]])
                     numpy2ri.deactivate()
             elif isinstance(X[keys[i]], int) or isinstance(X[keys[i]], float):
                 try:
-                    rlist[i] = np.array( [X[keys[i]]] )
+                    rlist[i] = np.array([X[keys[i]]])
                 except:
                     numpy2ri.activate()
-                    rlist[i] = np.array( [X[keys[i]]] )
+                    rlist[i] = np.array([X[keys[i]]])
                     numpy2ri.deactivate()
-        return( rlist )
+        return rlist
 
-def generate_HE_initial(he: dict, ML: bool=False, REML: bool=False) -> list:
-    '''
+
+def generate_HE_initial(he: dict, ML: bool = False, REML: bool = False) -> list:
+    """
     Convert HE estimates to initial parameter for ML / REML
 
     Parameters:
         he: estiamtes from HE
-        ML: generate initial parameters for ML 
+        ML: generate initial parameters for ML
         REML:   generate initial parameters for REML
     Returns:
         initial parameters for ML / REML
-    '''
+    """
     initials_random_effects = []
     # homogeneous effect
     if 'hom2' in he.keys():
-        initials_random_effects.append( he['hom2'] )
+        initials_random_effects.append(he['hom2'])
     # heterogeneous effect
     if 'V' in he.keys():
         C = he['V'].shape[0]
         # determine model based on V
-        if np.any( np.diag(np.diag(he['V'])) != he['V'] ):
+        if np.any(np.diag(np.diag(he['V'])) != he['V']):
             # Full model
             initials_random_effects = initials_random_effects + list(he['V'][np.triu_indices(C)])
-        elif len( np.unique( np.diag(he['V']) ) ) == 1:
+        elif len(np.unique(np.diag(he['V']))) == 1:
             # IID model
-            initials_random_effects.append( he['V'][0,0] )
+            initials_random_effects.append(he['V'][0, 0])
         else:
             # Free model
             initials_random_effects = initials_random_effects + list(np.diag(he['V']))
     # other random covariates
     if 'r2' in he.keys():
-        for key in np.sort( list(he['r2'].keys()) ):
-            initials_random_effects.append( he['r2'][key] )
+        for key in np.sort(list(he['r2'].keys())):
+            initials_random_effects.append(he['r2'][key])
 
     if REML is True:
-        return( initials_random_effects )
+        return initials_random_effects
 
     initials_fixed_effects = list(he['beta']['ct_beta'])
-    for key in np.sort( list(he['beta'].keys()) ):
+    for key in np.sort(list(he['beta'].keys())):
         if key != 'ct_beta':
-            initials_fixed_effects = initials_fixed_effects + list( he['beta'][key] )
+            initials_fixed_effects = initials_fixed_effects + list(he['beta'][key])
 
     if ML is True:
-        return( initials_fixed_effects + initials_random_effects )
+        return initials_fixed_effects + initials_random_effects
 
-def glse( sig2s: np.ndarray, X: np.ndarray, y: np.ndarray, inverse: bool=False ) -> np.ndarray:
-    '''
+
+def glse(sig2s: np.ndarray, X: np.ndarray, y: np.ndarray, inverse: bool = False) -> np.ndarray:
+    """
     Generalized least square estimates
 
     Parameters:
@@ -270,23 +288,24 @@ def glse( sig2s: np.ndarray, X: np.ndarray, y: np.ndarray, inverse: bool=False )
         inverse:    is sig2s inversed
     Returns:
         GLS of fixed effects
-    '''
+    """
     if not inverse:
-        if len( sig2s.shape ) == 1:
-            sig2s_inv = 1/sig2s
+        if len(sig2s.shape) == 1:
+            sig2s_inv = 1 / sig2s
             A = X.T * sig2s_inv
         else:
-            sig2s_inv = np.linalg.inv( sig2s )
+            sig2s_inv = np.linalg.inv(sig2s)
             A = X.T @ sig2s_inv
     else:
         sig2s_inv = sig2s
         A = X.T @ sig2s_inv
     B = A @ X
     beta = np.linalg.inv(B) @ A @ y
-    return( beta )
+    return beta
 
-def FixedeffectVariance_( beta: np.ndarray, x: np.ndarray ) -> float:
-    '''
+
+def FixedeffectVariance_(beta: np.ndarray, x: np.ndarray) -> float:
+    """
     Estimate variance explained by fixed effect
 
     Parameters:
@@ -294,16 +313,17 @@ def FixedeffectVariance_( beta: np.ndarray, x: np.ndarray ) -> float:
         x:  design matrix of fixed effect
     Returns:
         variance explained by fixed effect
-    '''
-    #xd = x - np.mean(x, axis=0)
-    #s = ( xd.T @ xd ) / x.shape[0]
-    s = np.cov( x, rowvar=False )
+    """
+    # xd = x - np.mean(x, axis=0)
+    # s = ( xd.T @ xd ) / x.shape[0]
+    s = np.cov(x, rowvar=False)
     if len(s.shape) == 0:
-        s = s.reshape(1,1)
-    return( beta @ s @ beta )
+        s = s.reshape(1, 1)
+    return beta @ s @ beta
 
-def FixedeffectVariance( beta: np.ndarray, xs: np.ndarray ) -> list:
-    '''
+
+def FixedeffectVariance(beta: np.ndarray, xs: np.ndarray) -> list:
+    """
     Estimate variance explained by each feature of fixed effect, e.g. cell type, sex
 
     Parameters:
@@ -311,14 +331,15 @@ def FixedeffectVariance( beta: np.ndarray, xs: np.ndarray ) -> list:
         xs: design matrices for fixed effects
     Returns:
         variances
-    '''
+    """
     j = 0
     vars = []
-    for i,x in enumerate(xs):
-        var = FixedeffectVariance_( beta[j:(j+x.shape[1])], x)
+    for i, x in enumerate(xs):
+        var = FixedeffectVariance_(beta[j:(j + x.shape[1])], x)
         vars.append(var)
         j = j + x.shape[1]
-    return( vars )
+    return vars
+
 
 def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars: dict) -> Tuple[dict, dict]:
     """
@@ -338,24 +359,25 @@ def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars: dict) -> Tup
 
     beta_d = assign_beta(beta, P, fixed_covars)
 
-    fixed_vars = {'ct_beta': FixedeffectVariance_( beta_d['ct_beta'], P) }
+    fixed_vars = {'ct_beta': FixedeffectVariance_(beta_d['ct_beta'], P)}
     # for key in fixed_covars.keys():
     #     fixed_vars[key] = FixedeffectVariance_( beta_d[key], fixed_covars[key] )
 
-#    fixed_covars_l = [P]
-#    for key in np.sort(list(fixed_covars_d.keys())):
-#        m_ = fixed_covars_d[key]
-#        if isinstance( m_, str ):
-#            m_ = np.loadtxt( m_ )
-#        if len( m_.shape ) == 1:
-#            m_ = m_.reshape(-1,1)
-#        fixed_covars_l.append( m_ )
-#
-#    fixedeffect_vars_l = FixedeffectVariance(beta, fixed_covars_l)
-#
-#    fixedeffect_vars_d = assign_fixedeffect_vars(fixedeffect_vars_l, fixed_covars_d)
+    #    fixed_covars_l = [P]
+    #    for key in np.sort(list(fixed_covars_d.keys())):
+    #        m_ = fixed_covars_d[key]
+    #        if isinstance( m_, str ):
+    #            m_ = np.loadtxt( m_ )
+    #        if len( m_.shape ) == 1:
+    #            m_ = m_.reshape(-1,1)
+    #        fixed_covars_l.append( m_ )
+    #
+    #    fixedeffect_vars_l = FixedeffectVariance(beta, fixed_covars_l)
+    #
+    #    fixedeffect_vars_d = assign_fixedeffect_vars(fixedeffect_vars_l, fixed_covars_d)
 
     return beta_d, fixed_vars
+
 
 def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
     """
@@ -370,7 +392,7 @@ def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
     """
     N, C = P.shape
 
-    beta_d = { 'ct_beta': beta_l[:C] }
+    beta_d = {'ct_beta': beta_l[:C]}
     beta_l = beta_l[C:]
 
     n = 0
@@ -382,22 +404,23 @@ def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
 
     if len(beta_l) == n:
         shared = True
-    elif len(beta_l) == (n*C):
+    elif len(beta_l) == (n * C):
         shared = False
-    log.logger.info(f'{len(beta_l)}, {n}')
+    # log.logger.info(f'{len(beta_l)}, {n}')
 
     for key in sorted(fixed_covars.keys()):
         x = fixed_covars[key]
-        if len( x.shape ) == 1:
-            x = x.reshape(-1,1)
+        if len(x.shape) == 1:
+            x = x.reshape(-1, 1)
         if shared:
             beta_d[key] = beta_l[:x.shape[1]]
             beta_l = beta_l[x.shape[1]:]
         else:
-            beta_d[key] = beta_l[:(x.shape[1]*C)]
+            beta_d[key] = beta_l[:(x.shape[1] * C)]
             beta_l = beta_l[x.shape[1] * C]
 
     return beta_d
+
 
 def assign_fixedeffect_vars(fixedeffect_vars_l: list, fixed_covars_d: dict) -> dict:
     """
@@ -413,10 +436,11 @@ def assign_fixedeffect_vars(fixedeffect_vars_l: list, fixed_covars_d: dict) -> d
     if len(fixed_covars_d.keys()) > 0:
         for key, value in zip(np.sort(list(fixed_covars_d.keys())), fixedeffect_vars_l[1:]):
             fixedeffect_vars_d[key] = value
-    return(fixedeffect_vars_d)
+    return fixedeffect_vars_d
 
-def _random_var( V: np.ndarray, X: np.ndarray ) -> float:
-    '''
+
+def _random_var(V: np.ndarray, X: np.ndarray) -> float:
+    """
     Compute variance of random effect
 
     Parameters:
@@ -424,42 +448,45 @@ def _random_var( V: np.ndarray, X: np.ndarray ) -> float:
         X:  design matrix
     Returns:
         variance explained
-    '''
-    return( np.trace( V @ (X.T @ X) ) / X.shape[0] )
+    """
+    return np.trace(V @ (X.T @ X)) / X.shape[0]
 
-def RandomeffectVariance( Vs: Union[list, dict], Xs: Union[list, dict] ) -> Union[list, dict]:
-    if isinstance( Xs, list ):
-        if len( np.array( Vs ).shape ) == 1:
+
+def RandomeffectVariance(Vs: Union[list, dict], Xs: Union[list, dict]) -> Union[list, dict]:
+    if isinstance(Xs, list):
+        if len(np.array(Vs).shape) == 1:
             Vs = [V * np.eye(X.shape[1]) for V, X in zip(Vs, Xs)]
 
-        vars = [_random_var(V,X) for V,X in zip(Vs, Xs)]
-    elif isinstance( Xs, dict ):
+        vars = [_random_var(V, X) for V, X in zip(Vs, Xs)]
+    elif isinstance(Xs, dict):
         vars = {}
         for key in Xs.keys():
             V, X = Vs[key], Xs[key]
             if isinstance(V, float):
-                V = V  * np.eye(X.shape[1])
-            vars[key] = _random_var(V,X)
-    return( vars )
+                V = V * np.eye(X.shape[1])
+            vars[key] = _random_var(V, X)
+    return vars
+
 
 def assign_randomeffect_vars(randomeffect_vars_l: list, r2_l: list, random_covars_d: dict) -> Tuple[dict, dict]:
-    '''
+    """
     Assign variance of random effects
-    '''
+    """
     randomeffect_vars_d = {}
     r2_d = {}
-    keys = np.sort( list(random_covars_d.keys()) )
+    keys = np.sort(list(random_covars_d.keys()))
     if len(keys) != 0:
-        for key, v1, v2 in zip( keys, randomeffect_vars_l, r2_l ):
+        for key, v1, v2 in zip(keys, randomeffect_vars_l, r2_l):
             randomeffect_vars_d[key] = v1
             r2_d[key] = v2
 
-    return( randomeffect_vars_d, r2_d )
+    return randomeffect_vars_d, r2_d
 
-def ct_random_var( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.ndarray]:
-    '''
+
+def ct_random_var(V: np.ndarray, P: np.ndarray) -> Tuple[float, np.ndarray]:
+    """
     Compute overall and specific variance of each cell type
-    
+
     Parameters:
         V:  cell type-specific random effect covariance matrix
         P:  cell type proportions
@@ -467,12 +494,13 @@ def ct_random_var( V: np.ndarray, P: np.ndarray ) -> Tuple[float, np.ndarray]:
         A tuple of
             #. overall variance
             #. cell type-specific variance
-    '''
+    """
     N, C = P.shape
     ct_overall_var = _random_var(V, P)
-    ct_specific_var = np.array([V[i,i] * ((P[:,i]**2).mean()) for i in range(C)])
+    ct_specific_var = np.array([V[i, i] * ((P[:, i] ** 2).mean()) for i in range(C)])
 
-    return( ct_overall_var, ct_specific_var )
+    return ct_overall_var, ct_specific_var
+
 
 def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict,
                  r2: dict, random_covars: dict
@@ -494,12 +522,13 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict,
             #.  dict of OP variance explained by random effects
     """
     # calculate variance of fixed and random effects, and convert to dict
-    beta, fixed_vars = fixedeffect_vars( beta, P, fixed_covars ) # fixed effects are always ordered
+    beta, fixed_vars = fixedeffect_vars(beta, P, fixed_covars)  # fixed effects are always ordered
     if isinstance(list(r2.values())[0], float):
-        random_vars = RandomeffectVariance( r2, random_covars )
+        random_vars = RandomeffectVariance(r2, random_covars)
     else:
         random_vars = {}
     return beta, fixed_vars, random_vars
+
 
 def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> float:
     """
@@ -514,35 +543,37 @@ def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> floa
         p value for Wald test on mean expression differentiation
     """
     C = len(beta)
-    T = np.concatenate( ( np.eye(C-1), (-1)*np.ones((C-1,1)) ), axis=1 )
+    T = np.concatenate((np.eye(C - 1), (-1) * np.ones((C - 1, 1))), axis=1)
     beta = T @ beta
     beta_var = T @ beta_var @ T.T
-    return(wald.mvwald_test(beta, np.zeros(C-1), beta_var, n=n, P=P))
+    return wald.mvwald_test(beta, np.zeros(C - 1), beta_var, n=n, P=P)
+
 
 def check_R(R: np.ndarray) -> bool:
-    '''
+    """
     Check R matrix: has to be matrix of 0 and 1
     in the structure of scipy.linalg.block_diag(np.ones((a,1)), np.ones((b,1)), np.ones((c,1))
-    '''
+    """
     # infer matrix R
     xs = np.sum(R, axis=0).astype('int')
-    R_ = np.ones((xs[0],1))
-    for i in range(1,len(xs)):
-        R_ = linalg.block_diag(R_, np.ones((xs[i],1)))
+    R_ = np.ones((xs[0], 1))
+    for i in range(1, len(xs)):
+        R_ = linalg.block_diag(R_, np.ones((xs[i], 1)))
 
     if np.any(R != R_):
-        print(R[:5,:])
-        print(R_[:5,:])
-        return( False )
+        print(R[:5, :])
+        print(R_[:5, :])
+        return False
     else:
-        return( True )
+        return True
 
-def order_by_randomcovariate(R: np.ndarray, Xs: list=[], Ys: dict={}
-        ) -> Tuple[np.ndarray, np.ndarray, list, dict]:
-    '''
+
+def order_by_randomcovariate(R: np.ndarray, Xs: list = [], Ys: dict = {}
+                             ) -> Tuple[np.ndarray, np.ndarray, list, dict]:
+    """
     R is the design matrix of 0 and 1 for a random covriate, which we order along by
     Xs or Ys: a list or dict of matrixs we want to order
-    '''
+    """
     R_df = pd.DataFrame(R)
     index = R_df.sort_values(by=list(R_df.columns), ascending=False).index
     R = np.take_along_axis(R, np.broadcast_to(index, (R.shape[1], R.shape[0])).T, axis=0)
@@ -566,11 +597,12 @@ def order_by_randomcovariate(R: np.ndarray, Xs: list=[], Ys: dict={}
             Y = np.take_along_axis(Y, index, axis=0)
         new_Ys[key] = Y
 
-    return(index, R, new_Xs, new_Ys)
+    return index, R, new_Xs, new_Ys
 
-def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covars: dict={}, 
-        random_covars: dict={}, P: Optional[np.ndarray]=None) -> tuple:
-    '''
+
+def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covars: dict = {},
+             random_covars: dict = {}, P: Optional[np.ndarray] = None) -> tuple:
+    """
     Remove one individual from the matrices for jackknife
 
     Parameters:
@@ -583,9 +615,9 @@ def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covar
         P:  cell type proportions
     Returns:
         a tuple of matrices after removing ith individual
-    '''
+    """
     Y_ = np.delete(Y, i, axis=0)
-    K_ = np.delete(np.delete(K,i,axis=0),i,axis=1)
+    K_ = np.delete(np.delete(K, i, axis=0), i, axis=1)
     ctnu_ = np.delete(ctnu, i, axis=0)
     fixed_covars_ = {}
     for key in fixed_covars.keys():
@@ -594,25 +626,28 @@ def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covar
     for key in random_covars.keys():
         random_covars_[key] = np.delete(random_covars[key], i, axis=0)
     if P is None:
-        return(Y_, K_, ctnu_, fixed_covars_, random_covars_)
+        return Y_, K_, ctnu_, fixed_covars_, random_covars_
     else:
         P_ = np.delete(P, i, axis=0)
-        return(Y_, K_, ctnu_, fixed_covars_, random_covars_, P_)
+        return Y_, K_, ctnu_, fixed_covars_, random_covars_, P_
+
 
 def lrt(l: float, l0: float, k: int) -> float:
-    '''
+    """
     Perfomr Likelihood-ration test (LRT)
 
     Parameters:
-        l, l0:  log likelihood for alternative and null hypothesis models
+        l:  log likelihood for alternative hypothesis models
+        l0: log likelihood for null hypothesis models
         k:  number of parameters constrained in null model compared to alternative
     Returns:
         p value for LRT
-    '''
+    """
 
-    Lambda = 2 * (l-l0)
+    Lambda = 2 * (l - l0)
     p = stats.chi2.sf(Lambda, k)
-    return(p)
+    return p
+
 
 def generate_tmpfn() -> str:
     tmpf = tempfile.NamedTemporaryFile(delete=False)
@@ -621,8 +656,9 @@ def generate_tmpfn() -> str:
     log.logger.info(tmpfn)
     return tmpfn
 
-def subprocess_popen(cmd: list, log_fn: str=None) -> None:
-    '''
+
+def subprocess_popen(cmd: list, log_fn: str = None) -> None:
+    """
     Run child process using Subprocess.Popen,
     while capture the stdout, stderr, and the exit code of the child process.
 
@@ -648,10 +684,10 @@ def subprocess_popen(cmd: list, log_fn: str=None) -> None:
     Notes
     -----
 
-    '''
+    """
     cmd = [str(x) for x in cmd]
-    proc = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE,
-            universal_newlines = True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True)
 
     # print cmd. proc.args only work for >= python 3.3
     try:
@@ -664,7 +700,7 @@ def subprocess_popen(cmd: list, log_fn: str=None) -> None:
     if log_fn is None:
         sys.stdout.write(stdout)
         if proc.returncode != 0:
-            sys.stderr.write('*'*20+'\n'+stderr+'*'*20+'\n')
+            sys.stderr.write('*' * 20 + '\n' + stderr + '*' * 20 + '\n')
             print(proc.returncode)
             raise Exception('child exception!')
     else:
@@ -679,28 +715,29 @@ def subprocess_popen(cmd: list, log_fn: str=None) -> None:
             log.close()
             stderr = open(log_fn).read()
             log = open(log_fn, 'w')
-            log.write(stdout+'\n')
-            log.write('*'*20+'\n'+stderr+'*'*20+'\n')
+            log.write(stdout + '\n')
+            log.write('*' * 20 + '\n' + stderr + '*' * 20 + '\n')
             log.close()
-            sys.stderr.write('*'*20+'\n'+stderr+'*'*20+'\n')
+            sys.stderr.write('*' * 20 + '\n' + stderr + '*' * 20 + '\n')
             print(proc.returncode)
             raise Exception('child exception!')
 
-def extract_vcf(input_f:str, panel_f: str=None, samples: npt.ArrayLike=None, samples_f: str=None, 
-        pops: npt.ArrayLike=None, snps_f: str=None, 
-        snps: npt.ArrayLike=None, maf_filter: bool=True, maf: str='0.000000001', 
-        geno: str='1', output_bfile: str=None, bim_only: bool=False, 
-        output_vcf_prefix: str=None, update_bim: bool=True,
-        ldprune: bool=False, ld_window_size: str='50', ld_step_size: str='5', 
-        ld_r2_threshold: str='0.2', memory: str=None, additional_operations: list=None
-        ) -> None:
-    '''
+
+def extract_vcf(input_f: str, panel_f: str = None, samples: npt.ArrayLike = None, samples_f: str = None,
+                pops: npt.ArrayLike = None, snps_f: str = None,
+                snps: npt.ArrayLike = None, maf_filter: bool = True, maf: str = '0.000000001',
+                geno: str = '1', output_bfile: str = None, bim_only: bool = False,
+                output_vcf_prefix: str = None, update_bim: bool = True,
+                ldprune: bool = False, ld_window_size: str = '50', ld_step_size: str = '5',
+                ld_r2_threshold: str = '0.2', memory: str = None, additional_operations: list = None
+                ) -> None:
+    """
     Extract samples in pops from 1000G using PLINK (v 1.9).
 
     Parameters
     ----------
     input_f:    input filename for vcf or bed/bim. If the input file is not end with .vcf/vcf.gz, assume bfile.
-    panel_f:    required when pops argu used. 
+    panel_f:    required when pops argu used.
                 Panel filename with at least columns of sample, pop, and super_pop, as in 1000G.
     samples:    a list of sample IDs.
     samples_f:  Sample file used for plink extracting individuals: without header, two columns, both of which are IID.
@@ -710,7 +747,7 @@ def extract_vcf(input_f:str, panel_f: str=None, samples: npt.ArrayLike=None, sam
     maf_filter: whether filter variants on maf
     maf:    maf threshold
     geno:   filters out all variants with missing call rates exceeding the provided value
-    output_bfile:   prefix for output bfile bed/bim 
+    output_bfile:   prefix for output bfile bed/bim
     bim_only:   output bim file only --make-just-bim
     update_bim: update the snpname to chr_pos_a2_a1 in bim file.
     output_vcf_prefix:  Prefix for output vcf filename ({output_vcf_prefix}.vcf.bgz).
@@ -727,9 +764,9 @@ def extract_vcf(input_f:str, panel_f: str=None, samples: npt.ArrayLike=None, sam
     -----
     Exclude monopolymorphic variants.
     vcf-half-cal treated as missing.
-    '''
+    """
 
-    operations = ['--geno', geno] 
+    operations = ['--geno', geno]
     if memory is not None:
         operations += ['--memory', memory]
 
@@ -748,7 +785,7 @@ def extract_vcf(input_f:str, panel_f: str=None, samples: npt.ArrayLike=None, sam
         samples[['sample', 'sample']].to_csv(samples_f, sep='\t', index=False, header=False)
         operations += ['--keep', samples_f]
     elif pops is not None:
-        panel = pd.read_table( panel_f )
+        panel = pd.read_table(panel_f)
         panel = panel.loc[np.isin(panel['pop'], pops) | np.isin(panel['super_pop'], pops)]
         panel = panel.reset_index(drop=True)
         samples_f = generate_tmpfn()
@@ -776,27 +813,28 @@ def extract_vcf(input_f:str, panel_f: str=None, samples: npt.ArrayLike=None, sam
             operations += ['--make-just-bim']
         else:
             operations += ['--make-bed']
-        subprocess_popen(['plink', '--out', output_bfile]+operations)
+        subprocess_popen(['plink', '--out', output_bfile] + operations)
         if update_bim:
-            update_bim_snpname(output_bfile+'.bim')
+            update_bim_snpname(output_bfile + '.bim')
         if snps_f:
             cmd = ['plink', '--bfile', output_bfile, '--keep-allele-order',
-                    '--extract', snps_f, '--make-bed', '--out', output_bfile]
+                   '--extract', snps_f, '--make-bed', '--out', output_bfile]
             if memory:
                 cmd += ['--memory', memory]
-            subprocess_popen( cmd )
+            subprocess_popen(cmd)
         if ldprune:
             plink_ldprune(output_bfile, ld_window_size=ld_window_size, ld_step_size=ld_step_size,
-                    ld_r2_threshold=ld_r2_threshold, output_bfile=output_bfile, memory=memory)
+                          ld_r2_threshold=ld_r2_threshold, output_bfile=output_bfile, memory=memory)
 
     # extract samples to vcf
     # double check whether ref allele reserved
     if output_vcf_prefix:
         subprocess_popen(['plink2', '--export', 'vcf', 'bgz', 'id-paste=iid',
-                '--out', output_vcf_prefix]+operations)
+                          '--out', output_vcf_prefix] + operations)
 
-def plink_ldprune(bfile: str, ld_window_size: str='50', ld_step_size: str='5', ld_r2_threshold: str='0.2',
-        output_bfile: str=None, memory: str=None) -> None:
+
+def plink_ldprune(bfile: str, ld_window_size: str = '50', ld_step_size: str = '5', ld_r2_threshold: str = '0.2',
+                  output_bfile: str = None, memory: str = None) -> None:
     '''
     Plink variance pruning using --indep-pairwise.
 
@@ -814,19 +852,20 @@ def plink_ldprune(bfile: str, ld_window_size: str='50', ld_step_size: str='5', l
     memory: memory of Plink
     '''
     if not output_bfile:
-        output_bfile = bfile+'.ldprune'
+        output_bfile = bfile + '.ldprune'
     prunefile_fn = generate_tmpfn()
     cmd1 = ['plink', '--bfile', bfile, '--indep-pairwise',
             ld_window_size, ld_step_size, ld_r2_threshold,
             '--out', prunefile_fn]
     cmd2 = ['plink', '--bfile', bfile, '--extract',
-            prunefile_fn+'.prune.in', '--memory', memory, '--keep-allele-order',
+            prunefile_fn + '.prune.in', '--memory', memory, '--keep-allele-order',
             '--make-bed', '--out', output_bfile]
     if memory:
         cmd1 += ['--memory', memory]
         cmd2 += '--memory', memory
-    basic_fun.subprocess_popen( cmd1 )
+    basic_fun.subprocess_popen(cmd1)
     basic_fun.subprocess_popen(cmd2)
+
 
 def update_bim_snpname(bim_fn: str) -> None:
     '''
@@ -836,11 +875,12 @@ def update_bim_snpname(bim_fn: str) -> None:
     ----------
     bim_fn: filename of bim
     '''
-    bim = pd.read_table(bim_fn, header=None, names=['chr', 'snp', 'genetic', 'pos', 'a1', 'a2']) # a2 a1 are ref alt
-    bim['snp'] = bim['chr'].astype('str')+'_'+bim['pos'].astype('str')+'_'+bim['a2']+'_'+bim['a1']
+    bim = pd.read_table(bim_fn, header=None, names=['chr', 'snp', 'genetic', 'pos', 'a1', 'a2'])  # a2 a1 are ref alt
+    bim['snp'] = bim['chr'].astype('str') + '_' + bim['pos'].astype('str') + '_' + bim['a2'] + '_' + bim['a1']
     bim.to_csv(bim_fn, sep='\t', index=False, header=False)
 
-def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str='plink') -> int:
+
+def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str = 'plink') -> int:
     """
     Compute kinship matrix for a genomic region (start-r, end+r)
 
@@ -859,8 +899,8 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str=
     end = end + r
 
     # check number of SNPs in the region
-    bim = pd.read_csv(bfile+'.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp','a1','a2'])
-    nsnp = bim.loc[(bim['chr']==chr) & (bim['bp'] > start) & (bim['bp'] < end)].shape[0]
+    bim = pd.read_csv(bfile + '.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp', 'a1', 'a2'])
+    nsnp = bim.loc[(bim['chr'] == chr) & (bim['bp'] > start) & (bim['bp'] < end)].shape[0]
 
     # compute kinship matrix
     if nsnp > 0:
@@ -869,21 +909,22 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str=
                    '--chr', chr, '--from-bp', start, '--to-bp', end,
                    '--make-rel', 'bin',
                    '--out', rel]
-            subprocess_popen( cmd )
+            subprocess_popen(cmd)
         elif tool == 'gcta':
             tmp = generate_tmpfn()
             cmd = ['plink', '--bfile', bfile,
                    '--chr', chr, '--from-bp', start, '--to-bp', end,
-                    '--make-bed', '--out', tmp]
-            subprocess_popen( cmd )
+                   '--make-bed', '--out', tmp]
+            subprocess_popen(cmd)
             cmd = ['gcta', '--bfile', tmp,
                    '--make-grm', '--out', rel]
-            subprocess_popen( cmd )
+            subprocess_popen(cmd)
 
     return nsnp
 
-def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Series=None, 
-        con: pd.Series=None, drop_first: bool=True) -> dict:
+
+def design(inds: npt.ArrayLike, pca: pd.DataFrame = None, PC: int = None, cat: pd.Series = None,
+           con: pd.Series = None, drop_first: bool = True) -> np.ndarray:
     """
     Construct design matrix
 
@@ -901,15 +942,32 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame=None, PC: int=None, cat: pd.Se
 
     # pca
     if pca is not None:
-        pcs = [f'PC{i}' for i in range(1, int(PC)+1)]
+        pcs = [f'PC{i}' for i in range(1, int(PC) + 1)]
         return pca.loc[inds, pcs].to_numpy()
     elif cat is not None:
         return pd.get_dummies(cat, drop_first=drop_first).loc[inds, :].to_numpy()
     elif con is not None:
         return con[inds].to_numpy()
 
-def L_f(C, c1, c2):
+
+def L_f(C: int, c1: int, c2: int) -> np.ndarray:
     # to build L matrix of 0 and 1
-    L = np.zeros((C,C), dtype='int8')
-    L[c1,c2] = 1
-    return( L )
+    L = np.zeros((C, C), dtype='int8')
+    L[c1, c2] = 1
+    return L
+
+
+def compute_h2(hom_g2: np.ndarray, V: np.ndarray, hom_e2: np.ndarray, W: np.ndarray) -> np.ndarray:
+    """
+    Compute h2 across transcriptome
+    """
+
+    sig_g2s = V + hom_g2[:, np.newaxis, np.newaxis]
+    sig_g2s = np.diagonal(sig_g2s, axis1=1, axis2=2)
+    sig_e2s = W + hom_e2[:, np.newaxis, np.newaxis]
+    sig_e2s = np.diagonal(sig_e2s, axis1=1, axis2=2)
+
+    # calculate heritability
+    sig2s = sig_g2s + sig_e2s
+    h2s = sig_g2s / sig2s
+    return h2s
