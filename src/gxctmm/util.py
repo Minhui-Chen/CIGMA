@@ -1,4 +1,4 @@
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, Union, List
 
 import os, tempfile, sys, subprocess, re
 import numpy as np, pandas as pd
@@ -504,7 +504,7 @@ def ct_random_var(V: np.ndarray, P: np.ndarray) -> Tuple[float, np.ndarray]:
 
 def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict,
                  r2: dict, random_covars: dict
-                 ) -> Tuple[dict, dict, dict, dict]:
+                 ) -> Tuple[dict, dict, dict]:
     """
     Compute variance explained by fixed effects and random effects
 
@@ -601,7 +601,7 @@ def order_by_randomcovariate(R: np.ndarray, Xs: list = [], Ys: dict = {}
 
 
 def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covars: dict = {},
-             random_covars: dict = {}, P: Optional[np.ndarray] = None) -> tuple:
+             random_covars: dict = {}, P: Optional[np.ndarray] = None, Kt: Optional[np.ndarray] = None) -> list:
     """
     Remove one individual from the matrices for jackknife
 
@@ -613,9 +613,11 @@ def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covar
         fixed_covars:   design matrix for Extra fixed effect
         random_covars:  design matrix for Extra random effect
         P:  cell type proportions
+        Kt: trans kinship matrix
     Returns:
-        a tuple of matrices after removing ith individual
+        a list of matrices after removing ith individual
     """
+
     Y_ = np.delete(Y, i, axis=0)
     K_ = np.delete(np.delete(K, i, axis=0), i, axis=1)
     ctnu_ = np.delete(ctnu, i, axis=0)
@@ -625,11 +627,16 @@ def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covar
     random_covars_ = {}
     for key in random_covars.keys():
         random_covars_[key] = np.delete(random_covars[key], i, axis=0)
-    if P is None:
-        return Y_, K_, ctnu_, fixed_covars_, random_covars_
-    else:
-        P_ = np.delete(P, i, axis=0)
-        return Y_, K_, ctnu_, fixed_covars_, random_covars_, P_
+        
+    out = [Y_, K_, ctnu_, fixed_covars_, random_covars_]
+
+    if P is not None:
+        out.append(np.delete(P, i, axis=0))
+    
+    if Kt is not None:
+        out.append(np.delete(np.delete(Kt, i, axis=0), i, axis=1))
+
+    return out
 
 
 def lrt(l: float, l0: float, k: int) -> float:
@@ -880,7 +887,7 @@ def update_bim_snpname(bim_fn: str) -> None:
     bim.to_csv(bim_fn, sep='\t', index=False, header=False)
 
 
-def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str = 'plink') -> int:
+def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str = 'plink', format: str = 'bin') -> int:
     """
     Compute kinship matrix for a genomic region (start-r, end+r)
 
@@ -892,6 +899,7 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str 
         r:  radius to the gene
         rel:    prefix for relationship matrix file (prefix.rel.bin for plink, prefix.grm.bin for gcta)
         tool:   plink or gcta to compute grm
+        format: output format for plink
     Returns:
         number of snps in the regions
     """
@@ -905,10 +913,16 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str 
     # compute kinship matrix
     if nsnp > 0:
         if tool == 'plink':
-            cmd = ['plink', '--bfile', bfile,
-                   '--chr', chr, '--from-bp', start, '--to-bp', end,
-                   '--make-rel', 'bin',
-                   '--out', rel]
+            if format == 'bin':
+                cmd = ['plink', '--bfile', bfile,
+                    '--chr', chr, '--from-bp', start, '--to-bp', end,
+                    '--make-rel', 'bin',
+                    '--out', rel]
+            elif format == 'gz':
+                cmd = ['plink', '--bfile', bfile,
+                    '--chr', chr, '--from-bp', start, '--to-bp', end,
+                    '--make-rel', 'gz',
+                    '--out', rel]
             subprocess_popen(cmd)
         elif tool == 'gcta':
             tmp = generate_tmpfn()
@@ -922,6 +936,43 @@ def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str 
 
     return nsnp
 
+
+def transform_grm(grm: np.ndarray) -> np.ndarray:
+    """
+    Transform 1d grm lower triangle to 2d
+
+    grm:    1d grm lower triangle
+    """
+
+    # Calculate the size of the square matrix based on the length of the 1D array
+    n = int(np.sqrt(len(grm) * 2))
+
+    # Create a symmetric 2D matrix
+    grm2 = np.zeros((n, n), dtype=grm.dtype)
+
+    # Fill the lower triangular part, including the diagonal
+    row, col = np.tril_indices(n)
+    grm2[row, col] = grm
+
+    # Reflect the lower triangular part to the upper triangular part
+    grm2[col, row] = grm
+
+    return grm2
+
+
+def sort_grm(grm: np.ndarray, old_order: List, new_order: List) -> np.ndarray:
+    """
+    Sort grm accordding to the order of individuals in new_order
+
+    grm:    2d grm
+    old_order:  old order of individuals
+    new_order:  new order of individuals
+    """
+
+    grm = pd.DataFrame(grm, index=old_order, columns=old_order)
+
+    return grm.loc[new_order, new_order].to_numpy()
+    
 
 def design(inds: npt.ArrayLike, pca: pd.DataFrame = None, PC: int = None, cat: pd.Series = None,
            con: pd.Series = None, drop_first: bool = True) -> np.ndarray:

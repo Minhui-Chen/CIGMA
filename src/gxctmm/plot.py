@@ -67,3 +67,9 @@ def snsbox_get_x(x_categories: int, hue_categories: int=1, width:float =0.8) -> 
     xs = xs.T.flatten()
     return xs
 
+
+def add_values_to_sns(ax, values):
+    for xtick, value in zip(ax.get_xticks(), values):
+        ax.text(xtick, value, f"{value:.3f}", ha='center', va='bottom', fontsize=10)
+
+
