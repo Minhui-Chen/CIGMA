@@ -1,4 +1,4 @@
-import re, time
+import re, time, os
 import numpy as np
 
 def merge_dicts(reps, out):
@@ -19,9 +19,14 @@ def list2array(dic):
 
 def main():
     reps = []
-    for f in snakemake.input.out:
-        for line in open(f):
-            reps.append( np.load(line.strip(), allow_pickle=True).item() )
+    _, file_extension = os.path.splitext(snakemake.input.out[0])
+    if file_extension == '.npy':
+        for f in snakemake.input.out:
+            reps += np.load(f, allow_pickle=True).tolist()
+    else:
+        for f in snakemake.input.out:
+            for line in open(f):
+                reps.append( np.load(line.strip(), allow_pickle=True).item() )
 
     out={}
     merge_dicts(reps, out)

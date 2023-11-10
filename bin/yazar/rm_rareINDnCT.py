@@ -1,6 +1,6 @@
 import time
 import numpy as np, pandas as pd
-from memory_profiler import profile
+
 
 def count_expressed(x, threshold=0.1):
     x = x.unstack()
@@ -10,7 +10,7 @@ def count_expressed(x, threshold=0.1):
     else:
         return False
 
-@profile
+
 def main():
     # read
     ctp = pd.read_table(snakemake.input.ctp, index_col=(0,1)).astype('float32')
@@ -21,8 +21,11 @@ def main():
     n_inds = n.shape[0]
     cts = n.columns.to_numpy()
     
-    # find common cts with less than 50% missing inds
-    common = n.median()[n.median() > int(snakemake.wildcards.ct_min_cellnum)].index.tolist()
+    # find common cts with less than prop missing inds
+    ct_min_cellnum = int(snakemake.wildcards.ct_min_cellnum)
+    prop = float(snakemake.wildcards.prop)
+    ct_nonmissing_props = (n > ct_min_cellnum).sum(axis=0) / n_inds
+    common = ct_nonmissing_props[ct_nonmissing_props > prop].index.tolist()
 
     # filter common cts
     ctp = ctp.loc[ctp.index.get_level_values('ct').isin(common)] 
@@ -42,20 +45,16 @@ def main():
     P.to_csv(snakemake.output.P, sep='\t')
 
     # filter rare ind-cts
-    print( time.time() )
     n = n.stack()
     common_cts = n[n > int(snakemake.wildcards.ct_min_cellnum)].index
     ctp = ctp.loc[ctp.index.isin( common_cts )]
     ctnu = ctnu.loc[ctnu.index.isin( common_cts )]
 
     # exclude gene expressed in limited individuals
-    print( time.time() )
     selected = ctp.apply( count_expressed )
     genes = ctp.columns[selected]
-    print( time.time() )
     ctp = ctp[genes]
     ctnu = ctnu[genes]
-    print( time.time() )
 
     #
     ctp.to_csv(snakemake.output.ctp, sep='\t')

@@ -13,7 +13,7 @@ from ctmm import wald
 from . import log
 
 
-def get_X(fixed_covars: dict, N: int, C: int, shared: bool = True) -> np.ndarray:
+def get_X(fixed_covars: dict, N: int, C: int, fixed_shared: bool = True) -> np.ndarray:
     """
     Compute the design matrix X for fixed effects.
 
@@ -22,7 +22,7 @@ def get_X(fixed_covars: dict, N: int, C: int, shared: bool = True) -> np.ndarray
                         except for cell type-specific fixed effect
         N:  number of individuals
         C:  number of cell types
-        shared: whether fixed effect is shared across cell types
+        fixed_shared: whether fixed effect is shared across cell types
     Returns:
         Design matrix for fixed effects
     """
@@ -32,7 +32,7 @@ def get_X(fixed_covars: dict, N: int, C: int, shared: bool = True) -> np.ndarray
         m = fixed_covars[key]
         if len(m.shape) == 1:
             m = m.reshape(-1, 1)
-        if shared:
+        if fixed_shared:
             X = np.concatenate((X, np.kron(m, np.ones((C, 1)))), axis=1)
         else:
             X = np.concatenate((X, np.kron(m, np.eye(C))), axis=1)
@@ -379,7 +379,7 @@ def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars: dict) -> Tup
     return beta_d, fixed_vars
 
 
-def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
+def assign_beta(beta_l: Union[np.ndarray, list], P: np.ndarray, fixed_covars: dict) -> dict:
     """
     Convert a list of fixed effect to dict for each feature
 
@@ -406,6 +406,8 @@ def assign_beta(beta_l: list, P: np.ndarray, fixed_covars: dict) -> dict:
         shared = True
     elif len(beta_l) == (n * C):
         shared = False
+    else:
+        sys.exit('Wrong dimension')
     # log.logger.info(f'{len(beta_l)}, {n}')
 
     for key in sorted(fixed_covars.keys()):
@@ -522,12 +524,12 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict,
             #.  dict of OP variance explained by random effects
     """
     # calculate variance of fixed and random effects, and convert to dict
-    beta, fixed_vars = fixedeffect_vars(beta, P, fixed_covars)  # fixed effects are always ordered
+    beta_d, fixed_vars = fixedeffect_vars(beta, P, fixed_covars)  # fixed effects are always ordered
+    random_vars = {}
     if isinstance(list(r2.values())[0], float):
         random_vars = RandomeffectVariance(r2, random_covars)
-    else:
-        random_vars = {}
-    return beta, fixed_vars, random_vars
+
+    return beta_d, fixed_vars, random_vars
 
 
 def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> float:
@@ -960,7 +962,7 @@ def transform_grm(grm: np.ndarray) -> np.ndarray:
     return grm2
 
 
-def sort_grm(grm: np.ndarray, old_order: List, new_order: List) -> np.ndarray:
+def sort_grm(grm: np.ndarray, old_order: List, new_order: npt.ArrayLike) -> np.ndarray:
     """
     Sort grm accordding to the order of individuals in new_order
 
@@ -969,13 +971,13 @@ def sort_grm(grm: np.ndarray, old_order: List, new_order: List) -> np.ndarray:
     new_order:  new order of individuals
     """
 
-    grm = pd.DataFrame(grm, index=old_order, columns=old_order)
+    grm = pd.DataFrame(grm.tolist(), index=old_order, columns=old_order)
 
     return grm.loc[new_order, new_order].to_numpy()
     
 
-def design(inds: npt.ArrayLike, pca: pd.DataFrame = None, PC: int = None, cat: pd.Series = None,
-           con: pd.Series = None, drop_first: bool = True) -> np.ndarray:
+def design(inds: npt.ArrayLike, pca: Optional[pd.DataFrame] = None, PC: Optional[int] = None, cat: Optional[pd.Series] = None,
+           con: Optional[pd.Series] = None, drop_first: bool = True) -> Optional[np.ndarray]:
     """
     Construct design matrix
 
@@ -992,8 +994,8 @@ def design(inds: npt.ArrayLike, pca: pd.DataFrame = None, PC: int = None, cat: p
     """
 
     # pca
-    if pca is not None:
-        pcs = [f'PC{i}' for i in range(1, int(PC) + 1)]
+    if pca is not None and PC is not None:
+        pcs = [f'PC{i}' for i in range(1, PC + 1)]
         return pca.loc[inds, pcs].to_numpy()
     elif cat is not None:
         return pd.get_dummies(cat, drop_first=drop_first).loc[inds, :].to_numpy()

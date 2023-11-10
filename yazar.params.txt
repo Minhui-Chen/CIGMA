@@ -1,4 +1,13 @@
 # ind_min_cellnum:  exclude individuals <= number of cells
-# ct_min_cellnum: For cts <= ct_min_cellnum, set nu and y to missing
-ind_min_cellnum	ct_min_cellnum	sex	PC	experiment	disease
-100	10	Y	6	R	Y
+# ct_min_cellnum: For cts <= ct_min_cellnum, set nu and y to missing. only keep cts with > prop non-missing values
+ind_min_cellnum	ct_min_cellnum	prop	sex	PC	experiment	disease
+#10	10	0.98	Y	6	R	Y
+#10	10	0.95	Y	6	R	Y
+10	10	0.9	Y	6	R	Y
+#10	100	0.9	Y	6	R	Y
+#10	50	0.9	Y	6	R	Y
+#10	50	0.6	Y	6	R	Y
+#10	50	0.5	Y	6	R	Y
+#10	20	0.9	Y	6	R	Y
+#10	20	0.6	Y	6	R	Y
+#10	20	0.5	Y	6	R	Y

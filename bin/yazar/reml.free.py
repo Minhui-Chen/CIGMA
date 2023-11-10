@@ -1,12 +1,10 @@
 import re, os, sys
 import numpy as np, pandas as pd
+from memory_profiler import profile
 from gxctmm import log, fit, util
 
 
 def main():
-    jk = snakemake.params.get('jk', False)
-    target = snakemake.params.get('target')
-
     # read
     ctps = pd.read_table(snakemake.input.ctp, index_col=(0, 1)).astype('float32')
     ctnus = pd.read_table(snakemake.input.ctnu, index_col=(0, 1)).astype('float32')
@@ -39,23 +37,14 @@ def main():
         'sex': util.design(inds, cat=meta['sex']),
         'age': util.design(inds, cat=util.age_group(meta['age']))
     }
-
-
-    if snakemake.params.get('batch', True):
-        random_covars = {
-            'batch': util.design(inds, cat=meta['pool'], drop_first=False)
-        }
-    else:
-        random_covars = {}
+    random_covars = {
+        'batch': util.design(inds, cat=meta['pool'], drop_first=False)
+    }
 
     # run
     outs = []
     for gene in genes:
         log.logger.info(f'Fitting {gene}')
-
-        # when only test one Target gene
-        if target and gene != target:
-            continue
 
         # extract gene data
         ctp = ctps[gene].unstack().to_numpy().astype('float32')
@@ -77,23 +66,11 @@ def main():
 
 
         ## Free
-        if 'genome' not in snakemake.input.keys():
-            free_he, free_he_wald = fit.free_HE(ctp, K, ctnu, P, fixed_covars, random_covars, jk=jk, dtype='float32')
-        else:
-            genome = []
-            for line in open(snakemake.input.genome):
-                genome += line.strip().split()
-            genome = np.array(genome)
-            genome = util.transform_grm(genome)
-            genome_ids = [line.strip().split()[0] for line in open(snakemake.input.genome + '.id')]
-            genome = util.sort_grm(genome, genome_ids, inds).astype('float32')
-
-            free_he, free_he_wald = fit.free_HE(ctp, K, ctnu, P, fixed_covars, random_covars, Kt=genome, jk=jk, dtype='float32')
+        free_he, free_he_wald = fit.free_REML(ctp, K, ctnu, P, fixed_covars, random_covars, method='BFGS-Nelder',
+                                              jk=False)
 
         # save
         out = {'gene': gene, 'free': free_he}
-        if len(free_he_wald) != 0:
-            out['p'] = {'free': free_he_wald}
         outs.append(out)
 
     np.save(snakemake.output.out, outs)

@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Union
 import re, os, sys
 import numpy as np, pandas as pd
 from numpy import linalg
-import zarr
+from scipy import linalg as sla
 import dask.array as da
 from memory_profiler import profile 
 
@@ -183,7 +183,7 @@ def extract( out: object, model: str, Y: np.ndarray, K: np.ndarray, P: np.ndarra
     else:
         shared = False
     y = Y.flatten()
-    X = util.get_X( fixed_covars, N, C, shared=shared )
+    X = util.get_X( fixed_covars, N, C, fixed_shared=shared )
 
     Vy = cal_Vy( hom_g2, hom_e2, V, W, r2, K, ctnu, _ZZT(random_covars) )
     beta = util.glse( Vy, X, y )
@@ -225,7 +225,7 @@ def _pMp(X:np.ndarray, X_inv: np.ndarray, A:np.ndarray, B:np.ndarray) -> np.ndar
 
 def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
            model: str, random_covars: dict={}, Kt:Optional[np.ndarray] = None, 
-           shared:bool = True, dtype:str = None) -> np.ndarray:
+           random_shared:bool = True, dtype:str = None) -> np.ndarray:
     """
     Perform OLS in HE
 
@@ -237,7 +237,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
         model:  free / full
         random_covars:  design matrices for Extra random effects
         Kt: kinship matrix for trans-eQTLs (currently only for Free model)
-        shared: whether Extra fixed and random effects are shared across cell types
+        random_shared: whether Extra random effects are shared across cell types
         dtype:  data type e.g. float32 to save memory
     Returns:
         OLS estimates
@@ -253,7 +253,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
     N, C = Y.shape
     y = Y.flatten()
     X_inv = linalg.inv(X.T @ X)
-    n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
+    n_random = len(random_covars.keys()) if random_shared else len(random_covars.keys()) * C
 
     # projection matrix
     proj = np.eye(N * C, dtype='int8') - X @ X_inv @ X.T # X: 1_N \otimes I_C append sex \otimes 1_C 
@@ -296,7 +296,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
             for key in sorted(random_covars.keys()):
                 Z = random_covars[key]
                 ZZT = Z @ Z.T
-                if shared:
+                if random_shared:
                     Q.append(_pMp(X, X_inv, ZZT, np.ones((C,C), dtype='int8')))
                 else:
                     for c in range(C):
@@ -353,7 +353,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
             for key in sorted(random_covars.keys()):
                 Z = random_covars[key]
                 ZZT = Z @ Z.T
-                if shared:
+                if random_shared:
                     Q.append( _pMp(X, X_inv, ZZT, np.ones((C, C), dtype='int8')) )
                 else:
                     for c in range(C):
@@ -436,7 +436,7 @@ def _reml(model:str, par: list, Y: np.ndarray, K: np.ndarray,
 
     N, C = Y.shape
     y = Y.flatten()
-    X = util.get_X( fixed_covars, N, C, shared=shared )
+    X = util.get_X( fixed_covars, N, C, fixed_shared=shared )
 
     funs = {
         'hom':  hom_REML_loglike,
@@ -506,7 +506,7 @@ def hom_REML(Y: np.ndarray, K: np.ndarray, P: np.ndarray, ctnu: np.ndarray,
     N, C = Y.shape
     y = Y.flatten()
     n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
-    X = util.get_X( fixed_covars, N, C, shared=shared )
+    X = util.get_X( fixed_covars, N, C, fixed_shared=shared )
 
     if par is None:
         beta = linalg.inv( X.T @ X ) @ ( X.T @ y )
@@ -563,7 +563,7 @@ def freeW_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
 
     N, C = Y.shape
     y = Y.flatten()
-    X = util.get_X( fixed_covars, N, C, shared=shared )
+    X = util.get_X( fixed_covars, N, C, fixed_shared=shared )
     n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
     n_par = 2 + 2 * C + X.shape[1] + n_random
 
@@ -626,7 +626,7 @@ def free_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
 
     N, C = Y.shape
     y = Y.flatten()
-    X = util.get_X( fixed_covars, N, C, shared=shared )
+    X = util.get_X( fixed_covars, N, C, fixed_shared=shared )
     n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
     n_par = 2 + 2 * C + X.shape[1] + n_random
 
@@ -720,7 +720,7 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
     N, C = Y.shape
     ngam = C*(C+1) // 2
     y = Y.flatten()
-    X = util.get_X( fixed_covars, N, C, shared=shared )
+    X = util.get_X( fixed_covars, N, C, fixed_shared=shared )
     n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
 
     if par is None:
@@ -736,13 +736,13 @@ def full_REML(Y:np.ndarray, K:np.ndarray, P:np.ndarray, ctnu:np.ndarray,
 
 def _free_he(Y: np.ndarray, K: np.ndarray, Kt: Optional[np.ndarray], 
              ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={}, 
-             random_covars: dict={}, shared: bool=False, output_beta: bool=True, 
-             dtype:str = None) -> dict:
+             random_covars: dict={}, fixed_shared: bool=False, random_shared: bool=False, 
+             output_beta: bool=True, dtype:str = None) -> dict:
 
     N, C = Y.shape
-    X = util.get_X(fixed_covars, N, C, shared=shared)
+    X = util.get_X(fixed_covars, N, C, fixed_shared=fixed_shared)
 
-    theta = he_ols(Y, K, X, ctnu, 'free', random_covars, Kt=Kt, shared=shared, dtype=dtype)
+    theta = he_ols(Y, K, X, ctnu, 'free', random_covars, Kt=Kt, random_shared=random_shared, dtype=dtype)
     if Kt is None:
         hom_g2, hom_e2 = theta[0], theta[1]
         V, W = np.diag(theta[2:(C + 2)]), np.diag(theta[(C + 2):(C * 2 + 2)])
@@ -769,12 +769,10 @@ def _free_he(Y: np.ndarray, K: np.ndarray, Kt: Optional[np.ndarray],
         out['ct_overall_gt_var'] = ct_overall_gt_var
         out['ct_specific_gt_var'] = ct_specific_gt_var
 
-    # GLS to get beta
+    # OLS to get beta
     if output_beta:
-        Vy = cal_Vy(hom_g2, hom_e2, V, W, r2, K, ctnu, _ZZT(random_covars), Kt=Kt, hom_gt2=hom_gt2, Vt=Vt)
-        beta = util.glse(Vy, X, Y.flatten())  # TODO: add ols when Vy is not sigular
-        # calculate variance of fixed and random effects, and convert to dict
-        beta, fixed_vars, random_vars = util.cal_variance(beta, P, fixed_covars, r2, random_covars)[:2]
+        beta = sla.inv(X.T @ X) @ X.T @ Y.flatten()
+        beta, fixed_vars, random_vars = util.cal_variance(beta, P, fixed_covars, r2, random_covars)
         
         out['beta'] = beta
         out['fixed_vars'] = fixed_vars
@@ -784,7 +782,7 @@ def _free_he(Y: np.ndarray, K: np.ndarray, Kt: Optional[np.ndarray],
 
 
 def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed_covars: dict={},
-        random_covars: dict={}, Kt:Optional[np.ndarray] = None, shared:bool = True, 
+        random_covars: dict={}, Kt:Optional[np.ndarray] = None, shared:bool = True, fixed_shared:bool=True, random_shared:bool=True,
         jk:bool = True, dtype:str = None) -> Tuple[dict, dict]:
     """
     Fitting Free model with HE
@@ -798,6 +796,8 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         random_covars:  design matrices for Extra random effects
         Kt:   kinship matrix for trans effect
         shared: whether Extra fixed and random effects are shared across cell types
+        fixed_shared: whether Extra fixed effects are shared across cell types
+        random_shared: whether Extra random effects are shared across cell types
         jk: perform jackknife
         dtype:  data type for he_ols, e.g. float32
 
@@ -809,13 +809,19 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
 
     log.logger.info('Fitting Free model with HE')
 
+    if shared:
+        random_shared = True
+        fixed_shared = True
+
     N, C = Y.shape 
-    X = util.get_X(fixed_covars, N, C, shared=shared)
+    X = util.get_X(fixed_covars, N, C, fixed_shared=shared)
     n_random = len(random_covars.keys()) if shared else len(random_covars.keys()) * C
     n_par = 2 + 2 * C + X.shape[1] + n_random  # TODO: don't include trans
 
+
     out = _free_he(Y, K, Kt, ctnu, P, fixed_covars, random_covars=random_covars,
-                   shared=shared, output_beta=False, dtype=dtype)
+                   fixed_shared=fixed_shared, random_shared=random_shared, 
+                   output_beta=False, dtype=dtype)
     out['nu'] = ( ctnu * (P ** 2) ).sum(axis=1)
     log.logger.info(out['nu'].dtype)
 
@@ -823,39 +829,53 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
     if jk:
         log.logger.info('Jackknife')
         #jacks = {'ct_beta':[], 'V':[], 'W':[], 'VW':[]}
-        jacks = {'V':[], 'W':[]}
+        jacks = {'hom_g2': [], 'V': [], 'hom_e2': [], 'W': []}
         for i in range(N):
+            if i % 10 == 0:
+                log.logger.info(i)
+
             if Kt is None:
                 Y_jk, K_jk, ctnu_jk, fixed_covars_jk, random_covars_jk, P_jk = util.jk_rmInd(
                                                 i, Y, K, ctnu, fixed_covars, random_covars, P=P)
 
                 out_jk = _free_he(Y_jk, K_jk, None, ctnu_jk, P_jk, fixed_covars_jk,
-                               random_covars_jk, shared, output_beta=False, dtype=dtype)
+                               random_covars_jk, fixed_shared, random_shared, output_beta=False, dtype=dtype)
 
             else:
                 Y_jk, K_jk, ctnu_jk, fixed_covars_jk, random_covars_jk, P_jk, Kt_jk = util.jk_rmInd(
                                                 i, Y, K, ctnu, fixed_covars, random_covars, P=P, Kt=Kt)
 
                 out_jk = _free_he(Y_jk, K_jk, Kt_jk, ctnu_jk, P_jk, fixed_covars_jk,
-                               random_covars_jk, shared, output_beta=False, dtype=dtype)
+                               random_covars_jk, fixed_shared, random_shared, output_beta=False, dtype=dtype)
                 
                 if 'Vt' not in jacks.keys():
                     jacks['Vt'] = []
                 jacks['Vt'].append(np.diag(out_jk['Vt']))
 
             #jacks['ct_beta'].append(out_jk['beta']['ct_beta'])
+            jacks['hom_g2'].append(out_jk['hom_g2'])
             jacks['V'].append(np.diag(out_jk['V']))
+            jacks['hom_e2'].append(out_jk['hom_e2'])
             jacks['W'].append(np.diag(out_jk['W']))
             # jacks['VW'].append(np.append( np.diag(out_jk['V']), np.diag(out_jk['W'])))
 
 
-        var_V = (N-1) * np.cov( np.array(jacks['V']).T, bias=True )
-        var_W = (N-1) * np.cov( np.array(jacks['W']).T, bias=True )
+        var_hom_g2 = (N - 1) * np.var(jacks['hom_g2'])
+        var_V = (N - 1) * np.cov(np.array(jacks['V']).T, bias=True)
+        var_hom_e2 = (N - 1) * np.var(jacks['hom_e2'])
+        var_W = (N - 1) * np.cov(np.array(jacks['W']).T, bias=True)
         # var_VW = (N-1) * np.cov( np.array(jacks['VW']).T, bias=True )
         #var_ct_beta = (N-1) * np.cov( np.array(jacks['ct_beta']).T, bias=True )
 
-        p = {   'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
+        p = {   
+                'hom_g2': wald.wald_test(out['hom_g2'], 0, var_hom_g2, N - n_par),
+                'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
+                'hom_e2': wald.wald_test(out['hom_e2'], 0, var_hom_e2, N - n_par),
                 'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), var_W, n=N, P=n_par),
+                'var_hom_g2': var_hom_g2,
+                'var_V': var_V,
+                'var_hom_e2': var_hom_e2,
+                'var_W': var_W,
                 # 'VW': wald.mvwald_test( np.append(np.diag(out['V']),np.diag(out['W'])), np.zeros(2*C), 
                     # var_VW, n=N, P=n_par),
                 #'ct_beta': util.wald_ct_beta( out['beta']['ct_beta'], var_ct_beta, n=N, P=n_par )
@@ -864,6 +884,14 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
         if Kt is not None:
             var_Vt = (N-1) * np.cov( np.array(jacks['Vt']).T, bias=True )
             p['Vt'] = wald.mvwald_test(np.diag(out['Vt']), np.zeros(C), var_Vt, n=N, P=n_par)
+        
+        # OLS to test fixed effect
+        y = Y.flatten()
+        beta = sla.inv(X.T @ X) @ X.T @ y
+        epsilon = y - X @ beta
+        s2 = (epsilon.T @ epsilon) / (N * C - X.shape[1]) # df
+        var_beta = s2 * sla.inv(X.T @ X)
+        p['ct_beta'] = util.wald_ct_beta(beta[:C], var_beta[:C, :C], n=N, P=n_par)  # df
     else:
         p = {}
     return out, p
@@ -892,10 +920,11 @@ def full_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray, fixed
 
     N, C = Y.shape 
     ntril = (C-1) * C // 2
-    X = util.get_X(fixed_covars, N, C, shared=shared)
+    X = util.get_X(fixed_covars, N, C, fixed_shared=shared)
 
     theta = he_ols(Y, K, X, ctnu, 'full', random_covars=random_covars,
-                   shared=shared, dtype=dtype)
+                   random_shared=shared, dtype=dtype)
+    log.logger.info(theta.dtype)
     V, W = np.diag(theta[:C]), np.diag(theta[C:(C*2)])
     V[np.triu_indices(C,k=1)] = theta[(C*2):(C*2 + ntril)]
     V = V + V.T - np.diag(theta[:C])

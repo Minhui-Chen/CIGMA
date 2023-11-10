@@ -2,52 +2,62 @@ import os, math, re
 from scipy import stats
 from scipy import linalg
 import numpy as np
+import pandas as pd
+
+
+def add_fixed(levels, ss, rng):
+    ''' Add a test fixed effect'''
+    a = rng.integers(levels, size=ss)
+    while len(np.unique(a)) < levels:
+        a = rng.integers(levels, size=ss)
+    X = pd.get_dummies(a, dtype='int8')
+
+    b = X.columns.to_numpy() / np.std(a) # to shrink
+    # centralize b
+    b = b - np.mean(X @ b)
+
+    return X.to_numpy(), b
+
+
+def add_random(levels, ss, rng):
+    ''' Add a test random effect'''
+    b = rng.normal(0, 1, levels)
+    a = rng.choice(b, ss)
+    while len(np.unique(a)) < levels:
+        a = rng.choice(b, ss)
+
+    X = pd.get_dummies(a, dtype='int8')
+    b = X.columns.to_numpy()
+
+    return X.to_numpy(), b
+
 
 def main():
-
     batch = snakemake.params.batches[int(snakemake.wildcards.i)]
-    G_fs = [snakemake.params.G.replace('repX','rep'+str(x)) for x in batch]
-    K_fs = [snakemake.params.K.replace('repX','rep'+str(x)) for x in batch]
-    P_fs = [snakemake.params.P.replace('repX','rep'+str(x)) for x in batch]
-    pi_fs = [snakemake.params.pi.replace('repX','rep'+str(x)) for x in batch]
-    s_fs = [snakemake.params.s.replace('repX','rep'+str(x)) for x in batch]
-    nu_fs = [snakemake.params.nu.replace('repX','rep'+str(x)) for x in batch]
-    ctnu_fs = [snakemake.params.ctnu.replace('repX','rep'+str(x)) for x in batch]
-    y_fs = [snakemake.params.y.replace('repX','rep'+str(x)) for x in batch]
-    Y_fs = [snakemake.params.Y.replace('repX','rep'+str(x)) for x in batch]
-
-    with open(snakemake.output.G, 'w') as f: f.write('\n'.join(G_fs))
-    with open(snakemake.output.K, 'w') as f: f.write('\n'.join(K_fs))
-    with open(snakemake.output.P, 'w') as f: f.write('\n'.join(P_fs))
-    with open(snakemake.output.pi, 'w') as f: f.write('\n'.join(pi_fs))
-    with open(snakemake.output.s, 'w') as f: f.write('\n'.join(s_fs))
-    with open(snakemake.output.nu, 'w') as f: f.write('\n'.join(nu_fs))
-    with open(snakemake.output.ctnu, 'w') as f: f.write('\n'.join(ctnu_fs))
-    with open(snakemake.output.y, 'w') as f: f.write('\n'.join(y_fs))
-    with open(snakemake.output.Y, 'w') as f: f.write('\n'.join(Y_fs))
 
     # par
     beta = np.loadtxt(snakemake.input.beta)
     V = np.loadtxt(snakemake.input.V)
     W = np.loadtxt(snakemake.input.W)
-    C = len( beta )
+    C = len(beta)
 
-    sig_g = float( snakemake.wildcards.vc.split('_')[1] )
-    sig_e = float( snakemake.wildcards.vc.split('_')[2] )
-    mean_nu = float( snakemake.wildcards.vc.split('_')[-1] )
-    var_nu = float( snakemake.wildcards.var_nu )
-    a = np.array( [ float(x) for x in snakemake.wildcards.a.split('_') ] )
-    ss = int( float( snakemake.wildcards.ss ) )
+    sig_g = float(snakemake.wildcards.vc.split('_')[1])
+    sig_e = float(snakemake.wildcards.vc.split('_')[2])
+    mean_nu = float(snakemake.wildcards.vc.split('_')[-1])
+    var_nu = float(snakemake.wildcards.var_nu)
+    a = np.array([float(x) for x in snakemake.wildcards.a.split('_')])
+    ss = int(float(snakemake.wildcards.ss))
 
-    rng = np.random.default_rng()
 
-    for G_f, K_f, P_f, pi_f, s_f, nu_f, ctnu_f, y_f, Y_f in zip(G_fs,
-            K_fs, P_fs, pi_fs, s_fs, nu_fs, ctnu_fs, y_fs, Y_fs):
-        os.makedirs(os.path.dirname(P_f), exist_ok=True)
+    data = {}
+    for i in batch:
+        rng = np.random.default_rng(snakemake.params.seed + i)
+        data[i] = {}
+
         # simulate genotypes
         ## draw allele frequency from beta distribution
-        frq = rng.beta(snakemake.params.beta[0], snakemake.params.beta[1], snakemake.params.L*5)
-        frq = frq[(frq > snakemake.params.maf) & (frq < (1-snakemake.params.maf))][:snakemake.params.L]
+        frq = rng.beta(snakemake.params.beta[0], snakemake.params.beta[1], snakemake.params.L * 5)
+        frq = frq[(frq > snakemake.params.maf) & (frq < (1 - snakemake.params.maf))][:snakemake.params.L]
         G = []
         for frq_ in frq:
             ## draw genotype from binomial distribution based on allele frequency
@@ -58,26 +68,34 @@ def main():
         ## convert SNP x IND to IND x SNP
         G = np.array(G).T
         ## standardize
-        #if np.any(np.std(G, axis=0) == 0):
+        # if np.any(np.std(G, axis=0) == 0):
         #    sys.exit(f'{sum(np.std(G, axis=0) == 0)}')
         G = stats.zscore(G)
         ## save
-        np.savetxt(G_f, G, fmt='%.6e', delimiter='\t')
+        data[i]['G'] = G
 
         # calculate K
         K = G @ G.T / G.shape[1]
-        np.savetxt(K_f, K, fmt='%.6e', delimiter='\t')
+        data[i]['K'] = K
 
         # simulate SNP effect
         ## additive effect
         ### draw from normal distribution of N(0, hom2/L)
-        add = rng.normal(0, math.sqrt(sig_g/snakemake.params.L), snakemake.params.L)
+        add = rng.normal(0, math.sqrt(sig_g / snakemake.params.L), snakemake.params.L)
+        add = add - np.mean(add)
+        add = add * math.sqrt(sig_g / snakemake.params.L) / np.std(add)
         if len(add) != snakemake.params.L:
             print(add)
             print(len(add))
             sys.exit('Weird')
-        ## interaction effect
-        H = rng.multivariate_normal(np.zeros(C), V/snakemake.params.L, snakemake.params.L) # of shape SNP x cell type
+
+        ## CT-specific SNP effect
+        if np.all(V == np.zeros_like(V)):
+            H = np.zeros((snakemake.params.L, C))
+        else:
+            H = rng.multivariate_normal(np.zeros(C), V / snakemake.params.L, snakemake.params.L)  # of shape SNP x cell type
+            H = H - np.mean(H, axis=0)  # TODO: covariance in Full model is not stded
+            H = (H * np.sqrt(np.diag(V)/snakemake.params.L)) / np.std(H, axis=0)
 
         # calculate alpha, shared genetic effect
         alpha_g = G @ add
@@ -87,16 +105,17 @@ def main():
 
         # simulate cell type proportions
         P = rng.dirichlet(alpha=a, size=ss)
-        np.savetxt(P_f, P, fmt='%.6e', delimiter='\t')
+        data[i]['P'] = P
         pi = np.mean(P, axis=0)
-        np.savetxt(pi_f, pi, delimiter='\t')
+        data[i]['pi'] = pi
+
         ## estimate S
         ### demean P
-        pd = P-pi
+        pd = P - pi
         ### covariance
-        s = (pd.T @ pd)/ss
-        #print(bmatrix(s))
-        np.savetxt(s_f, s, delimiter='\t')
+        s = (pd.T @ pd) / ss
+        # print(bmatrix(s))
+        data[i]['s'] = s
 
         # calculate ct fixed effect
         ct_main = P @ beta
@@ -106,7 +125,7 @@ def main():
 
         # simulate cell type-specific noise
         gamma_e = rng.multivariate_normal(np.zeros(C), W, ss)
-        # calculate cell type-specific noise effect
+        # calculate cell type-specific noise for OP
         ct_e = linalg.khatri_rao(np.eye(ss), P.T).T @ gamma_e.flatten()
 
         # draw residual error
@@ -117,10 +136,10 @@ def main():
         k = mean_nu / theta
         ### variance of error for each individual
         nu = rng.gamma(k, scale=theta, size=ss)
-        np.savetxt(nu_f, nu, delimiter='\t')
+        data[i]['nu'] = nu
         #### variance of error for each individual-cell type
-        ctnu = nu.reshape(-1,1) * ( 1/P )
-        np.savetxt(ctnu_f, ctnu, delimiter='\t')
+        ctnu = nu.reshape(-1, 1) * (1 / P)
+        data[i]['ctnu'] = ctnu
 
         ## draw residual error from normal distribution with variance drawn above
         error = rng.normal(loc=0, scale=np.sqrt(nu))
@@ -128,10 +147,26 @@ def main():
 
         # generate overall pseudobulk
         y = ct_main + alpha_g + alpha_e + ct_g + ct_e + error
-        Y = np.outer(np.ones(ss), beta) + np.outer(alpha_g+alpha_e, np.ones(C)) + G @ H + gamma_e + ct_error
+        Y = np.outer(np.ones(ss), beta) + np.outer(alpha_g + alpha_e, np.ones(C)) + G @ H + gamma_e + ct_error
 
-        np.savetxt(y_f, y, delimiter='\t')
-        np.savetxt(Y_f, Y, delimiter='\t')
+        # add Extra fixed and random effect
+        if 'fixed' in snakemake.wildcards.keys():
+            X, b = add_fixed(int(snakemake.wildcards.fixed), ss, rng)
+            y = y + X @ b
+            Y = Y + (X @ b)[:, np.newaxis]
+            data[i]['fixed'] = X
+        
+        if 'random' in snakemake.wildcards.keys():
+            X, b = add_random(int(snakemake.wildcards.random), ss, rng)
+            y = y + X @ b
+            Y = Y + (X @ b)[:, np.newaxis]
+            data[i]['random'] = X
+
+        data[i]['y'] = y
+        data[i]['Y'] = Y
+
+    np.save(snakemake.output.data, data)
+
 
 if __name__ == '__main__':
     main()
