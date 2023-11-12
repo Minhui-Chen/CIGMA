@@ -4,6 +4,7 @@ logs/
 data/
 analysis/
 staging/
+results/
 src/gxctmm/__pycache__
 src/GxCTMM.egg-info
 
@@ -187,3 +188,4 @@ results/yazar/subset_cts/CD4/ind_min_cellnum~100_ct_min_cellnum~10_sex~Y_PC~6_ex
 results/yazar/subset_cts/CD4/ind_min_cellnum~100_ct_min_cellnum~50_sex~Y_PC~6_experiment~R_disease~Y/he.free.h2.png
 results/yazar/subset_cts/CD8/ind_min_cellnum~100_ct_min_cellnum~10_sex~Y_PC~6_experiment~R_disease~Y/he.free.h2.png
 results/yazar/subset_cts/CD8/ind_min_cellnum~100_ct_min_cellnum~50_sex~Y_PC~6_experiment~R_disease~Y/he.free.h2.png
+staging

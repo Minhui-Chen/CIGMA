@@ -1013,6 +1013,7 @@ def L_f(C: int, c1: int, c2: int) -> np.ndarray:
 def compute_h2(hom_g2: np.ndarray, V: np.ndarray, hom_e2: np.ndarray, W: np.ndarray) -> np.ndarray:
     """
     Compute h2 across transcriptome
+    First column is the shared heritability, following columns are the ct specific heritability,
     """
 
     sig_g2s = V + hom_g2[:, np.newaxis, np.newaxis]
@@ -1022,5 +1023,14 @@ def compute_h2(hom_g2: np.ndarray, V: np.ndarray, hom_e2: np.ndarray, W: np.ndar
 
     # calculate heritability
     sig2s = sig_g2s + sig_e2s
-    h2s = sig_g2s / sig2s
+
+    # ct specific
+    ct_h2s = sig_g2s / sig2s
+
+    # shared
+    shared_h2s = np.mean(sig_g2s, axis=1) / np.mean(sig2s, axis=1)
+
+    # merge
+    h2s = np.insert(ct_h2s, 0, shared_h2s, axis=1)
+
     return h2s

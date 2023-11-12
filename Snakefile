@@ -163,9 +163,9 @@ rule sim_mergeBatches_REML:
 yazar_ind_col = 'individual'
 yazar_ct_col = 'cell_label'
 
-yazar_ct_order = np.array(['CD4 NC', 'CD8 ET', 'NK', 'CD8 NC', 'B IN', 'CD4 ET', 'B Mem', 'Mono C', 'CD8 S100B', 'Mono NC', 'NK R', 'DC', 'CD4 SOX4', 'Plasma'])
-yazar_colors = dict(zip(yazar_ct_order, sns.color_palette()))
-
+yazar_ct_order = np.array(['hom', 'CD4 NC', 'CD8 ET', 'NK', 'CD8 NC', 'B IN', 'CD4 ET', 'B Mem', 'Mono C', 'CD8 S100B', 'Mono NC', 'NK R', 'DC', 'CD4 SOX4', 'Plasma'])
+yazar_colors = dict(zip(yazar_ct_order[1:], sns.color_palette()))
+yazar_colors['hom'] = '0.7'
 
 # read parameters
 yazar_params = pd.read_table('yazar.params.txt', dtype="str", comment='#')
@@ -771,7 +771,7 @@ use rule yazar_HE_free as yazar_nomissing_HE_free with:
     output:
         out = f'staging/yazar/nomissing/{yazar_paramspace.wildcard_pattern}/he.free.batch{{i}}.npy',
     params:
-        jk = True,
+        jk = False,
         snps = 5, # threshold of snp number per gene
 
 
