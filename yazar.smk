@@ -69,7 +69,7 @@ rule yazar_ctp_extractX:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
     resources:
-        mem_mb = '40G',
+        mem_mb = '90G',
     run:
         import scanpy as sc
         from scipy import sparse
@@ -115,7 +115,7 @@ rule yazar_ctp:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
     resources:
-        mem_mb = '40G',
+        mem_mb = '80G',
     run:
         from scipy import sparse
         from ctmm import preprocess

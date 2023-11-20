@@ -128,7 +128,7 @@ def main():
         axes[2].text(-0.05, y_loc, "mean:", ha='center', va='center', transform=axes[2].transAxes)
         for xtick, mean in zip(axes[2].get_xticks(), trans_means):
             x = axes[2].transLimits.transform((xtick, mean))[0]
-            axes[2].text(x, y_loc, f"{mean:.2f}", ha='center', va='center', transform=axes[2].transAxes)
+            axes[2].text(x, y_loc, f"{mean:.3f}", ha='center', va='center', transform=axes[2].transAxes)
 
         axes[2].axhline(0, ls='--', color='0.8', zorder=0)
         axes[2].set_xlabel('')
