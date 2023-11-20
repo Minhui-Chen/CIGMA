@@ -123,7 +123,7 @@ rule sim_HE:
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{{i}}.npy',
     resources:
-        time = '100:00:00',
+        time = '36:00:00',
         mem_mb = '10G',
     priority: 1
     script: 'bin/sim/he.py'
@@ -275,7 +275,13 @@ rule yazar_exclude_duplicatedSNPs:
         dup = 'analysis/yazar/data/geno/chr{chr}.dup',
     shell:
         '''
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        # load plink 1.9
+        if [[ $(hostname) == *midway* ]]; then
+            module load plink
+        else
+            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        fi
+
         prefix="$(dirname {output.bed})/$(basename {output.bed} .bed)"
         zcat {input.vcf}|grep -v '#'|cut -f 3|sort|uniq -d > {output.dup}
         plink --vcf {input.vcf} --double-id --keep-allele-order \
@@ -296,13 +302,21 @@ rule yazar_geno_pca:
     params:
         prefix = lambda wildcards, output: os.path.splitext(output.eigenvec)[0],
         tmp_dir = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/geno_tmp',
+    resources:
+        mem_mb = '40G',
     shell:
         '''
+        # load plink 1.9
+        if [[ $(hostname) == *midway* ]]; then
+            module load plink
+        else
+            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        fi
+
         if [ -d {params.tmp_dir} ]; then 
             rm -r {params.tmp_dir} 
         fi
         mkdir -p {params.tmp_dir}
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
         ind_f="{params.tmp_dir}/inds.txt" 
         zcat {input.P}|tail -n +2|awk '{{print $1,$1}}' > $ind_f
         merge_f="{params.tmp_dir}/merge.list"
@@ -354,26 +368,6 @@ rule yazar_gene_location:
     script: 'bin/yazar/gene_location.py'
 
 
-# rule yazar_he_kinship:  # TODO: save kinship in npy, see file size
-#     input:
-#         genes = 'data/Yazar2022Science/gene_loation.txt',
-#         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.gz',
-#         bed = 'analysis/yazar/data/geno/chr{chr}.bed',
-#     output:
-#         kinship = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.chr{{chr}}.txt'),
-#     params:
-#         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship/gene.rel.bin', 
-#         r = int(float(5e5)),
-#     resources:
-#         mem_mb = '2G',
-#     shell: 
-#         '''
-#         module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-#         mkdir -p $(dirname {params.kinship})
-#         python3 bin/yazar/kinship.py {input.genes} {input.P} {params.r} {input.bed} {wildcards.chr} \
-#                         {params.kinship} {output.kinship} 
-#         '''
-
 rule yazar_he_kinship:
     input:
         genes = 'data/Yazar2022Science/gene_loation.txt',
@@ -384,10 +378,16 @@ rule yazar_he_kinship:
     params:
         r = int(float(5e5)),
     resources:
-        mem_mb = '20G',
+        mem_mb = lambda wildcards: '20G' if wildcards.chr != '1' else '80G',
     shell: 
         '''
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        # load plink 1.9
+        if [[ $(hostname) == *midway* ]]; then
+            module load plink
+        else
+            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        fi
+
         python3 bin/yazar/kinship.npy.py {input.genes} {input.P} {params.r} {input.bed} {wildcards.chr} \
                         {output.kinship} 
         '''
@@ -414,7 +414,7 @@ rule yazar_he_kinship_merge:
     output:
         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.npz',
     resources:
-        mem_mb = '90G',
+        mem_mb = '150G',
     run:
         all = {}
         for chr, kinship in zip(range(1, 23), input.kinship):
@@ -455,7 +455,7 @@ rule yazar_he_kinship_split:
         kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.batch{i}.npy'
                 for i in range(yazar_he_batches)],   # TODO: temp?
     resources:
-        mem_mb = '90G',
+        mem_mb = '150G',
     run:
         data = {}
         for key, value in np.load(input.kinship, allow_pickle=True).items():
@@ -539,8 +539,8 @@ rule yazar_HE_free:
     params:
         snps = 5, # threshold of snp number per gene
     resources:
-        mem_mb = '30G',
-        time = '100:00:00',
+        mem_mb = '40G',
+        time = '36:00:00',
     script: 'bin/yazar/he.free.py' 
 
 

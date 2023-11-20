@@ -7,6 +7,7 @@ staging/
 results/
 src/gxctmm/__pycache__
 src/GxCTMM.egg-info
+midway
 
 # Temporary and binary files
 *~

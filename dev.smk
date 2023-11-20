@@ -434,11 +434,18 @@ rule yazar_gcta_grm:
         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship/gene.grm.bin',
         r = int(float(5e5)),
     resources:
-        mem_mb = '2G',
+        mem_mb = '20G',
     shell:
         '''
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-        module load gcc/11.3.0 gcta/1.94.1
+        # load plink 1.9
+        # TODO: add GCTA in midway
+        if [[ $(hostname) == *midway* ]]; then
+            module load plink
+        else
+            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+            module load gcc/11.3.0 gcta/1.94.1
+        fi
+
         mkdir -p $(dirname {params.kinship})
         python3 bin/yazar/kinship.py \
                 {input.genes} {input.P} {params.r} \
@@ -511,6 +518,7 @@ rule yazar_gcta_split_kinship:
         indexs = np.array_split(kinship.index, len(output.kinship))
         for index, f in zip(indexs, output.kinship):
             kinship.loc[index].to_csv(f, sep='\t', index=False)
+
 
 rule yazar_gcta_greml_op:
     input:
@@ -1832,13 +1840,21 @@ rule yazar_trans_genome_kinship:
     params:
         prefix = lambda wildcards, output: os.path.splitext(output.kinship)[0],
         tmp_dir = lambda wildcards, output: os.path.splitext(output.kinship)[0] + '_tmp',
+    resources:
+        mem_mb = '20G',
     shell:
         '''
+        # load plink 1.9
+        if [[ $(hostname) == *midway* ]]; then
+            module load plink
+        else
+            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        fi
+
         if [ -d {params.tmp_dir} ]; then 
             rm -r {params.tmp_dir} 
         fi
         mkdir -p {params.tmp_dir}
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
         ind_f="{params.tmp_dir}/inds.txt" 
         zcat {input.P}|tail -n +2|awk '{{print $1,$1}}' > $ind_f
         merge_f="{params.tmp_dir}/merge.list"
@@ -2040,6 +2056,7 @@ use rule yazar_HE_Free_VW_plot as yazar_nomissing_trans_HE_Free_VW_plot with:
         out = f'analysis/yazar/nomissing/{yazar_paramspace.wildcard_pattern}/trans/he.free.npy',
     output:
         png = f'results/yazar/nomissing/{yazar_paramspace.wildcard_pattern}/trans/he.free.VW.png',
+        p_png = f'results/yazar/nomissing/{yazar_paramspace.wildcard_pattern}/trans/he.free.VW.p.png',
 
 
 rule yazar_nomissing_trans_all:
