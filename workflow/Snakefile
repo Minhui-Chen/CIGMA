@@ -1,0 +1,46 @@
+import colorsys
+import sys, os, re, time, shutil, gzip 
+import numpy as np, pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from snakemake.utils import Paramspace 
+
+
+# make a logs folders to save log files
+os.makedirs('./logs/', exist_ok=True)
+
+
+# configure
+configfile: "config/config.yaml"
+
+
+# par
+mycolors = sns.color_palette(config['colorpalette'])
+chrs = range(1, 23)
+
+
+# wildcard constraints
+wildcard_constraints: i='[0-9]+'
+wildcard_constraints: window = '[0-9]+'
+wildcard_constraints: l='[^/]+'
+wildcard_constraints: r='[^/]+'
+wildcard_constraints: disease='[^/]+'
+wildcard_constraints: model='\w+'
+wildcard_constraints: var_nu='[^/]+'
+wildcard_constraints: transform='[^/]+'
+wildcard_constraints: alpha='[^/]+'
+wildcard_constraints: prop='[^/]+'
+wildcard_constraints: lam='[^/]+'
+wildcard_constraints: h2='[^/]+'
+
+
+
+############### load rules ################
+
+include: 'rules/common.smk'
+include: 'rules/sim.smk'
+include: 'rules/yazar.smk'
+include: 'rules/perez.smk'
+include: 'yazar.smk'
+include: 'dev.smk'
