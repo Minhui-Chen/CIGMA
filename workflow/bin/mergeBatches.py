@@ -1,13 +1,6 @@
 import re, time, os
 import numpy as np
-
-def merge_dicts(reps, out):
-    for key, value in reps[0].items():
-        if isinstance(value, dict):
-            out[key] = {}
-            merge_dicts([rep[key] for rep in reps], out[key])
-        else:
-            out[key] = [rep[key] for rep in reps]
+from gxctmm import util
 
 ## list to array
 def list2array(dic):
@@ -29,7 +22,7 @@ def main():
                 reps.append( np.load(line.strip(), allow_pickle=True).item() )
 
     out={}
-    merge_dicts(reps, out)
+    util.merge_dicts(reps, out)
     list2array(out)
 
     np.save(snakemake.output.out, out)

@@ -1,4 +1,4 @@
-import os, math, re
+import os, math, re, sys
 from scipy import stats
 from scipy import linalg
 import numpy as np
@@ -32,6 +32,24 @@ def add_random(levels, ss, rng):
     return X.to_numpy(), b
 
 
+def adjust_min_value(arr, cut=0.01):
+    for i in range(arr.shape[0]):
+        row = arr[i]
+        deficit = 0
+        
+        # Identify elements less than 0.01
+        mask = row < cut
+        deficit = np.sum(cut - row[mask])
+        
+        # Set the minimum value to 0.01 for elements that are less than 0.01
+        row[mask] = cut
+        
+        # Redistribute the deficit proportionally to elements greater than 0.01
+        row[~mask] -= deficit * (row[~mask] / np.sum(row[~mask]))
+    
+    return arr
+
+
 def main():
     batch = snakemake.params.batches[int(snakemake.wildcards.i)]
 
@@ -44,7 +62,7 @@ def main():
     sig_g = float(snakemake.wildcards.vc.split('_')[1])
     sig_e = float(snakemake.wildcards.vc.split('_')[2])
     mean_nu = float(snakemake.wildcards.vc.split('_')[-1])
-    var_nu = float(snakemake.wildcards.var_nu)
+    var_nu = (float(snakemake.wildcards.std_nu_scale) * mean_nu) ** 2
     a = np.array([float(x) for x in snakemake.wildcards.a.split('_')])
     ss = int(float(snakemake.wildcards.ss))
 
@@ -81,20 +99,23 @@ def main():
         # simulate SNP effect
         ## additive effect
         ### draw from normal distribution of N(0, hom2/L)
-        add = rng.normal(0, math.sqrt(sig_g / snakemake.params.L), snakemake.params.L)
-        add = add - np.mean(add)
-        add = add * math.sqrt(sig_g / snakemake.params.L) / np.std(add)
-        if len(add) != snakemake.params.L:
-            print(add)
-            print(len(add))
-            sys.exit('Weird')
+        if sig_g == 0:
+            add = np.zeros(snakemake.params.L)
+        else:
+            add = rng.normal(0, math.sqrt(sig_g / snakemake.params.L), snakemake.params.L)
+            add = add - np.mean(add)
+            add = add * math.sqrt(sig_g / snakemake.params.L) / np.std(add)
+            if len(add) != snakemake.params.L:
+                print(add)
+                print(len(add))
+                sys.exit('Weird')
 
         ## CT-specific SNP effect
         if np.all(V == np.zeros_like(V)):
             H = np.zeros((snakemake.params.L, C))
         else:
             H = rng.multivariate_normal(np.zeros(C), V / snakemake.params.L, snakemake.params.L)  # of shape SNP x cell type
-            H = H - np.mean(H, axis=0)  # TODO: covariance in Full model is not stded
+            H = H - np.mean(H, axis=0)  # NOTE: covariance in Full model is not stded
             H = (H * np.sqrt(np.diag(V)/snakemake.params.L)) / np.std(H, axis=0)
 
         # calculate alpha, shared genetic effect
@@ -105,6 +126,8 @@ def main():
 
         # simulate cell type proportions
         P = rng.dirichlet(alpha=a, size=ss)
+        P = adjust_min_value(P, 0.05)
+        assert np.allclose(P.sum(axis=1), np.ones(P.shape[0]))
         data[i]['P'] = P
         pi = np.mean(P, axis=0)
         data[i]['pi'] = pi
@@ -132,14 +155,20 @@ def main():
         ## draw variance of residual error for each individual from gamma distribution \Gamma(k, theta)
         ## with mean = k * theta, var = k * theta^2, so theta = var / mean, k = mean / theta
         ## since mean = 0.2 and assume var = 0.01, we can get k and theta
-        theta = var_nu / mean_nu
-        k = mean_nu / theta
-        ### variance of error for each individual
-        nu = rng.gamma(k, scale=theta, size=ss)
-        data[i]['nu'] = nu
-        #### variance of error for each individual-cell type
-        ctnu = nu.reshape(-1, 1) * (1 / P)
-        data[i]['ctnu'] = ctnu
+        if mean_nu == 0:
+            nu = np.zeros(ss)
+            data[i]['nu'] = nu
+            ctnu = np.zeros((ss, C))
+            data[i]['ctnu'] = ctnu
+        else:
+            theta = var_nu / mean_nu
+            k = mean_nu / theta
+            ### variance of error for each individual
+            nu = rng.gamma(k, scale=theta, size=ss)
+            data[i]['nu'] = nu
+            #### variance of error for each individual-cell type
+            ctnu = nu.reshape(-1, 1) * (1 / P)
+            data[i]['ctnu'] = ctnu
 
         ## draw residual error from normal distribution with variance drawn above
         error = rng.normal(loc=0, scale=np.sqrt(nu))

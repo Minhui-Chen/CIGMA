@@ -24,13 +24,15 @@ def main():
         f.write('gene\tK\tsnps\n')
     
         # make kinship for each gene
-        for _, row in genes.loc[genes['chr']==chr].iterrows():
+        for _, row in genes.loc[genes['chr'] == chr].iterrows():
             gene, start, end = row['feature'], row['start'], row['end']
-            kinship_prefix = os.path.join(os.path.dirname(kinship_tmp),gene)
+            kinship_prefix = os.path.join(os.path.dirname(kinship_tmp), gene)
             if re.search('rel.bin$', kinship_tmp):
-                nsnp = util.grm(chr_prefix, chr, start, end, r, kinship_prefix, 'plink')
+                nsnp = util.grm(chr_prefix, kinship_prefix, chr, start, end, r, tool='plink')
             elif re.search('grm.bin$', kinship_tmp):
-                nsnp = util.grm(chr_prefix, chr, start, end, r, kinship_prefix, 'gcta')
+                nsnp = util.grm(chr_prefix, kinship_prefix, chr, start, end, r, tool='gcta')
+                if os.path.exists(f'{kinship_prefix}.grm.N.bin'):
+                    os.remove(f'{kinship_prefix}.grm.N.bin')  # this file is not needed for GREML. remove it to save space.
             f.write(f'{gene}\t{kinship_prefix}.rel.bin\t{nsnp}\n')
 
     os.remove(chr_prefix+'.bed')

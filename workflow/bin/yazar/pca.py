@@ -17,6 +17,7 @@ def main():
     u, s, vh = np.linalg.svd(y)
     s2 = s * s
     s2 = s2 / s2.sum()
+    # print(s2)
 
     ## pca eval plot
     fig, ax = plt.subplots()

@@ -56,17 +56,20 @@ def main():
     if ct_genetic_vc == 0:
         V = np.zeros((C,C))
     else:
-        V_diag = [float(x) for x in snakemake.wildcards.V_diag.split('_')]
-        V = np.diag(V_diag)
-        if snakemake.wildcards.V_tril != '0':
-            V_tril = [float(x) for x in snakemake.wildcards.V_tril.split('_')]
+        if snakemake.wildcards.model == 'iid':
+            V = np.eye(C)
+        else:
+            V_diag = [float(x) for x in snakemake.wildcards.V_diag.split('_')]
+            V = np.diag(V_diag)
+            if snakemake.wildcards.V_tril != '0':
+                V_tril = [float(x) for x in snakemake.wildcards.V_tril.split('_')]
 
-            ## calculate V
-            V[np.tril_indices(C, k=-1)] = V_tril
-            for i in range(1, C):
-                for j in range(i):
-                    V[i,j] = V[i,j] * math.sqrt(V[i,i] * V[j,j])
-            V = V + np.tril(V, k=-1).T
+                ## calculate V
+                V[np.tril_indices(C, k=-1)] = V_tril
+                for i in range(1, C):
+                    for j in range(i):
+                        V[i,j] = V[i,j] * math.sqrt(V[i,i] * V[j,j])
+                V = V + np.tril(V, k=-1).T
 
     ## \tr{V S} + pi^T V pi = 0.25
     if np.all(V == 0):
@@ -85,17 +88,20 @@ def main():
     if ct_noise_vc == 0:
         W = np.zeros((C,C))
     else:
-        W_diag = [float(x) for x in snakemake.wildcards.W_diag.split('_')]
-        W = np.diag(W_diag)
-        if snakemake.wildcards.W_tril != '0':
-            W_tril = [float(x) for x in snakemake.wildcards.W_tril.split('_')]
+        if snakemake.wildcards.model == 'iid':
+            W = np.eye(C)
+        else:
+            W_diag = [float(x) for x in snakemake.wildcards.W_diag.split('_')]
+            W = np.diag(W_diag)
+            if snakemake.wildcards.W_tril != '0':
+                W_tril = [float(x) for x in snakemake.wildcards.W_tril.split('_')]
 
-            ## calculate W
-            W[np.tril_indices(C, k=-1)] = W_tril
-            for i in range(1, C):
-                for j in range(i):
-                    W[i,j] = W[i,j] * math.sqrt(W[i,i] * W[j,j])
-            W = W + np.tril(W, k=-1).T
+                ## calculate W
+                W[np.tril_indices(C, k=-1)] = W_tril
+                for i in range(1, C):
+                    for j in range(i):
+                        W[i,j] = W[i,j] * math.sqrt(W[i,i] * W[j,j])
+                W = W + np.tril(W, k=-1).T
 
     ## \tr{W S} + pi^T W pi = 0.1
     if np.all(W == 0):

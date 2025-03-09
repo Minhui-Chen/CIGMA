@@ -1,16 +1,60 @@
 from typing import Tuple, Optional, Union, List
 
-import os, tempfile, sys, subprocess, re
+import os, tempfile, sys, subprocess, re, gzip, time, shutil
 import numpy as np, pandas as pd
 import numpy.typing as npt
+# import jax
+# import jax.numpy as jnp
+# import jax.scipy as jsp
+# import jaxopt
+# import tensorflow as tf
+# import tensorflow_probability as tfp
 import rpy2.robjects as ro
 from rpy2.robjects import r, pandas2ri, numpy2ri
 from rpy2.robjects.conversion import localconverter
 from scipy import stats, linalg, optimize
 from numpy.random import default_rng
 
-from ctmm import wald
-from . import log
+from . import log, fit, wald
+
+
+
+def merge_dicts(reps, out):
+    for key, value in reps[0].items():
+        print(key)
+        if isinstance(value, dict):
+            out[key] = {}
+            merge_dicts([rep[key] for rep in reps], out[key])
+        else:
+            out[key] = [rep[key] for rep in reps]
+
+
+def design(inds: npt.ArrayLike, pca: Optional[pd.DataFrame] = None, 
+           PC: Optional[int] = None, cat: Optional[pd.Series] = None,
+           con: Optional[pd.Series] = None, drop_first: bool = True) -> np.ndarray:
+    """
+    Construct design matrix
+
+    Parameters:
+        inds:   order of individuals
+        pca:    dataframe of pcs, with index: individuals (sort not required) and columns (PC1-PCx)
+        PC: number to PC to adjust
+        cat:    series of category elements e.g. sex: male and female
+        con:    series of continuous elements e.g. age
+        drop_first: drop the first column
+
+    Returns:
+        a design matrix
+    """
+
+    # pca
+    if pca is not None:
+        pcs = [f'PC{i}' for i in range(1, int(PC) + 1)]
+        return pca.loc[inds, pcs].to_numpy()
+    elif cat is not None:
+        return pd.get_dummies(cat, drop_first=drop_first, dtype='int').loc[inds, :].to_numpy()
+    elif con is not None:
+        return con[inds].to_numpy()
 
 
 def get_X(fixed_covars: dict, N: int, C: int, fixed_shared: bool = True) -> np.ndarray:
@@ -32,6 +76,15 @@ def get_X(fixed_covars: dict, N: int, C: int, fixed_shared: bool = True) -> np.n
         m = fixed_covars[key]
         if len(m.shape) == 1:
             m = m.reshape(-1, 1)
+        # remove columns that have only one unique value
+        cols_to_keep = [i for i in range(m.shape[1]) 
+                        if np.unique(m[:, i]).size > 1]
+        if len(cols_to_keep) < m.shape[1]:
+            log.logger.info(f'Remove {m.shape[1] - len(cols_to_keep)} columns in {key}')
+        m = m[:, cols_to_keep]
+        # if m is empty, skip it
+        if m.size == 0:
+            continue
         if fixed_shared:
             X = np.concatenate((X, np.kron(m, np.ones((C, 1)))), axis=1)
         else:
@@ -79,11 +132,10 @@ def read_covars(fixed_covars: dict = {}, random_covars: dict = {}, C: Optional[i
     return fixed_covars, random_covars, n_fixed, n_random, random_keys, Rs, random_MMT
 
 
-def age_group(age: pd.Series):
+def age_group(age: pd.Series, bins: npt.NDArray = np.arange(25, 91, 5)):
     """
     Separate age groups
     """
-    bins = np.arange(25, 91, 5)
     new = pd.Series(np.digitize(age, bins), index=age.index)
     if age.name is None:
         return new
@@ -91,7 +143,133 @@ def age_group(age: pd.Series):
         return new.rename(age.name)
 
 
-def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, dict]:
+def yazar_covars(inds: list, meta_f: str, geno_pca_f: str, op_pca_f: str,
+                 geno_pca_n: int = 6, op_pca_n: int = 1
+                 ) -> Tuple[dict, dict]:
+    """
+    Read Yazar covariates
+
+    Parameters:
+        inds:  individuals to include in the design matrix
+        meta_f:  file of metadata
+        geno_pca_f:  file of genotype PCs
+        op_pca_f:  file of other PCs
+        geno_pca_n:  number of genotype PCs to use
+        op_pca_n:  number of other PCs to use
+    Returns:
+        a tuple of
+            #. dict of genotype PCs
+            #. dict of other PCs
+    """
+    
+    # read metadata
+    meta = pd.read_table(meta_f, usecols=['individual', 'sex', 'age', 'pool'])
+    meta = meta.loc[meta['individual'].isin(inds)]
+    meta = meta.drop_duplicates()
+    meta = meta.set_index('individual')
+    geno_pca = pd.read_table(geno_pca_f, index_col=0).drop('IID', axis=1)
+    op_pca = pd.read_table(op_pca_f, index_col=0)
+
+    fixed_covars = {
+        'op_pca': construct_design(inds, pca=op_pca, PC=op_pca_n).astype('float32'),
+        'sex': construct_design(inds, cat=meta['sex']),
+        'age': construct_design(inds, cat=age_group(meta['age']))
+    }
+    if geno_pca_n != 0:
+        fixed_covars['geno_pca'] = construct_design(inds, pca=geno_pca, PC=geno_pca_n).astype('float32')
+
+    random_covars = {
+        'batch': construct_design(inds, cat=meta['pool'], drop_first=False)
+    }
+
+    return fixed_covars, random_covars
+
+
+def perez_covars(inds: list, meta_f: str, geno_pca_f: str, op_pca_f: str, 
+                 batch: Optional[str] = 'shared', geno_pca_n: int = 7,
+                 op_pca_n: int = 10, include_dataset: bool = False
+                 ) -> Tuple[dict, dict]:
+    """
+    Read Perez covariates
+
+    Parameters:
+        inds:  individuals to include in the design matrix
+        meta_f:  file of metadata
+        geno_pca_f:  file of genotype PCs
+        op_pca_f:  file of other PCs
+        batch:  batch effect to include in the design matrix. None, 'fixed', 'shared', or 'specific'
+        geno_pca_n:  number of genotype PCs to use
+        op_pca_n:  number of other PCs to use
+        include_dataset:  whether to include dataset as a fixed effect
+    Returns:
+        a tuple of
+            #. dict of genotype PCs
+            #. dict of other PCs
+    """
+    
+    # read metadata
+    meta = pd.read_table(meta_f, usecols=['ind_cov', 'Sex', 'Age', 'batch_cov', 
+                                          'pop_cov', 'SLE_status', 
+                                          'Processing_Cohort', 'dataset'])
+    meta = meta.drop_duplicates()
+    meta = meta.set_index('ind_cov')
+    geno_pca = pd.read_table(geno_pca_f, index_col=0).drop('IID', axis=1)
+    op_pca = pd.read_table(op_pca_f, index_col=0)
+
+    fixed_covars = {
+        'op_pca': construct_design(inds, pca=op_pca, PC=op_pca_n).astype('float32'),
+        'geno_pca': construct_design(inds, pca=geno_pca, PC=geno_pca_n).astype('float32'),
+        'sex': construct_design(inds, cat=meta['Sex']),
+        'age': construct_design(inds, cat=age_group(meta['Age'], bins=np.arange(25, 71, 5))),
+        'sle': construct_design(inds, cat=meta['SLE_status']),
+        'cohort': construct_design(inds, cat=meta['Processing_Cohort']),
+        'population': construct_design(inds, cat=meta['pop_cov']),
+    }
+    if include_dataset:
+        # only needed in mega analysis. 
+        # Euro controls: CLUES are all in Processing cohort 4 and ImmVar are all not in that cohort
+        fixed_covars['dataset'] = construct_design(inds, cat=meta['dataset']) 
+
+    random_covars = {}
+    if batch is None or batch is False:
+        pass
+    elif batch == 'shared':
+        random_covars = {
+            'batch': construct_design(inds, cat=meta['batch_cov'], drop_first=False)
+        }
+
+    return fixed_covars, random_covars
+
+
+def transform_he_to_reml(free_he: dict) -> list:
+    """
+    Transform HE results to initial parameters for REML
+    """
+    par = [free_he['hom_g2']] + np.diag(free_he['V']).tolist()
+    par += [free_he['hom_e2']] + np.diag(free_he['W']).tolist()
+    
+    if 'hom_g2_b' in free_he.keys():
+        par += [free_he['hom_g2_b']] + np.diag(free_he['V_b']).tolist()
+    if len(free_he['r2'].keys()) > 0:
+        if len(free_he['r2'].keys()) > 1:
+            raise ValueError("Currently only support one extra random effect")
+        
+        key = list(free_he['r2'].keys())[0]
+        if isinstance(free_he['r2'][key], float):
+            par += [free_he['r2'][key]]
+        else:
+            raise ValueError("Currently only support shared extra random effect")
+
+    # change negative values to small positive
+    par = np.array(par)
+    par[par < 0] = 0.001
+    par = par.tolist()
+
+    return par
+
+
+def optim(fun: callable, par: list, args: tuple, method: Optional[str],
+          ) -> Tuple[dict, dict]:
     """
     Optimization use scipy.optimize.minimize
 
@@ -107,56 +285,81 @@ def optim(fun: callable, par: list, args: tuple, method: str) -> Tuple[object, d
     """
     if method is None:
         method = 'BFGS'
+
+    start = time.time()
+
     if method == 'BFGS-Nelder':
+        start1 = time.time()
         out1 = optimize.minimize(fun, par, args=args, method='BFGS')
+        start2 = time.time()
         out = optimize.minimize(fun, out1['x'], args=args, method='Nelder-Mead')
+        out['l'] = out['fun'] * (-1)
         opt = {'method1': 'BFGS', 'success1': out1['success'], 'status1': out1['status'],
-               'message1': out1['message'], 'l1': out1['fun'] * (-1),
-               'method': 'Nelder-Mead', 'success': out['success'], 'status': out['status'],
-               'message': out['message'], 'l': out['fun'] * (-1)}
+            'message1': out1['message'], 'l1': out1['fun'] * (-1),
+            'method': 'Nelder-Mead', 'success': out['success'], 'status': out['status'],
+            'message': out['message'], 'l': out['fun'] * (-1),
+            'initial': par,
+            'time1': start2 - start1, 'time2': time.time() - start2}
     else:
         out = optimize.minimize(fun, par, args=args, method=method)
+        out['l'] = out['fun'] * (-1)
         opt = {'method': method, 'success': out['success'], 'status': out['status'],
-               'message': out['message'], 'l': out['fun'] * (-1)}
+            'message': out['message'], 'l': out['fun'] * (-1),
+            'initial': par}
+
+    opt['time'] = time.time() - start
+
     return out, opt
 
 
-def check_optim(opt: dict, hom_g2: float, hom_e2: float, ct_overall_g_var: float, ct_overall_e_var: float,
-                fixed_vars: dict, random_vars: dict = {}, cut: float = 5) -> bool:
+def check_optim(opt: dict, vars: dict, fixed_vars: dict, 
+                random_vars: dict = {}, cut: float = 1) -> bool:
     """
     Check whether optimization converged successfully
 
     Parameters:
         opt:    dict of optimization results, e.g. log-likelihood
-        hom_g2: variance of genetic effect shared across cell types
-        hom_e2: variance of env effect shared across cell types
-        ct_overall_g_var:  overall variance explained by cell type-specific genetic effect
-        ct_overall_e_var:  overall variance explained by cell type-specific env effect
-        fixed_var:  dict of variances explained by each fixed effect feature, including cell type-specific fixed effect
-        random_var: dict of variances explained by each random effect feature, doesn't include cell type-shared or -specific effect
+        var: dict of variances explained by e.g. 
+                hom_g2: variance of genetic effect shared across cell types
+                hom_e2: variance of env effect shared across cell types
+                ct_overall_g_var:  overall variance explained by cell type-specific genetic effect
+                ct_overall_e_var:  overall variance explained by cell type-specific env effect
+        fixed_vars:  dict of variances explained by each fixed effect feature, including cell type-specific fixed effect
+        random_vars:  dict of variances explained by each random effect feature, doesn't include cell type-shared or -specific effect
         cut:    threshold for large variance
     Returns:
         True:   optim failed to converge
         False:  optim successfully to converge
     """
-    if ((opt['l'] < -1e10) or (not opt['success']) or (hom_g2 > cut) or (hom_e2 > cut) or
-            (ct_overall_g_var > cut) or (ct_overall_e_var > cut) or
+    if ((opt['l'] < -1e10) or (not opt['success']) or 
+            np.any(np.array(list(vars.values())) > cut) or
             np.any(np.array(list(fixed_vars.values())) > cut) or
             np.any(np.array(list(random_vars.values())) > cut)):
-        log.logger.info(
-            f"l:{opt['l']}, {opt['success']}, message: {opt['message']}, hom_g2: {hom_g2}, hom_e2: {hom_e2} \n"
-            f"overall cell type-specific genetic effect: {ct_overall_g_var} \n"
-            f"overall cell type-specific env effect: {ct_overall_e_var} \n"
-            f"cell type-specific fixed effect: {fixed_vars['ct_beta']}")
+        info = f"l:{opt['l']}, {opt['success']}\n"
+        if 'message' in opt.keys():
+            info += f"message: {opt['message']}\n"
+        if 'Wolfe' in opt.keys():
+            info += f"Wolfe: {opt['Wolfe']}\n"
+        info += f"hom_g2: {vars['hom_g2']}, hom_e2: {vars['hom_e2']} \n"
+        info += f"overall cell type-specific genetic effect: {vars['ct_overall_g_var']} \n"
+        if 'ct_overall_g2_var' in vars.keys():
+            info += f"overall cell type-specific genetic effect 2: {vars['ct_overall_g2_var']} \n"
+        info += f"overall cell type-specific env effect: {vars['ct_overall_e_var']} \n"
+        info += f"cell type-specific fixed effect: {fixed_vars['ct_beta']}\n"
+        for key in random_vars.keys():
+            info += f"{key}: {random_vars[key]} \n"
         if 'success1' in opt.keys():
-            log.logger.info(f"{opt['success1']}: {opt['message1']}")
+            info += f"{opt['success1']}: {opt['message1']} \n"
+        log.logger.info(info)
+
         return True
     else:
         return False
 
 
-def re_optim(out: object, opt: dict, fun: callable, par: list, args: tuple, method: str, nrep: int = 10) -> Tuple[
-    object, dict]:
+def re_optim(out: dict, opt: dict, fun: callable, par: list, args: tuple, 
+             method: Optional[str], nrep: int = 10
+             ) -> Tuple[dict, dict]:
     """
     Rerun optimization
 
@@ -177,11 +380,11 @@ def re_optim(out: object, opt: dict, fun: callable, par: list, args: tuple, meth
     # print( out['fun'] )
     for i in range(nrep):
         par_ = np.array(par) * rng.gamma(2, 1 / 2, len(par))
-        out_, opt_ = optim(fun, par_, args=args, method=method)
-        log.logger.info(f"-loglike: {out_['fun']}")
+        out_, opt_ = optim(fun, par_.tolist(), args=args, method=method)
+        log.logger.info(f"loglike: {out_['l']}")
         if (not out['success']) and out_['success']:
             out, opt = out_, opt_
-        elif (out['success'] == out_['success']) and (out['fun'] > out_['fun']):
+        elif (out['success'] == out_['success']) and (out['l'] < out_['l']):
             out, opt = out_, opt_
     # print( out['fun'] )
     return out, opt
@@ -209,7 +412,7 @@ def dict2Rlist(X: dict) -> object:
                     try:
                         rlist[i] = np.array([X[keys[i]]])
                     except:
-                        numpy2ri.activate()
+                        numpy2ri.activate()  # don't think this is useful
                         rlist[i] = np.array([X[keys[i]]])
                         numpy2ri.deactivate()  # deactivate would cause numpy2ri deactivated in calling fun
             elif isinstance(X[keys[i]], pd.DataFrame):
@@ -294,7 +497,14 @@ def glse(sig2s: np.ndarray, X: np.ndarray, y: np.ndarray, inverse: bool = False)
             sig2s_inv = 1 / sig2s
             A = X.T * sig2s_inv
         else:
-            sig2s_inv = np.linalg.inv(sig2s)
+            try:
+                sig2s_inv = np.linalg.inv(sig2s)
+            except np.linalg.LinAlgError as e:
+                print(e)
+                w = np.linalg.eigvalsh(sig2s)
+                print(f"Eigenvalues of sig2s: {w}")
+                sys.exit(1)
+
             A = X.T @ sig2s_inv
     else:
         sig2s_inv = sig2s
@@ -360,8 +570,8 @@ def fixedeffect_vars(beta: np.ndarray, P: np.ndarray, fixed_covars: dict) -> Tup
     beta_d = assign_beta(beta, P, fixed_covars)
 
     fixed_vars = {'ct_beta': FixedeffectVariance_(beta_d['ct_beta'], P)}
-    # for key in fixed_covars.keys():
-    #     fixed_vars[key] = FixedeffectVariance_( beta_d[key], fixed_covars[key] )
+    for key in fixed_covars.keys():
+        fixed_vars[key] = FixedeffectVariance_( beta_d[key], fixed_covars[key] )
 
     #    fixed_covars_l = [P]
     #    for key in np.sort(list(fixed_covars_d.keys())):
@@ -499,7 +709,8 @@ def ct_random_var(V: np.ndarray, P: np.ndarray) -> Tuple[float, np.ndarray]:
     """
     N, C = P.shape
     ct_overall_var = _random_var(V, P)
-    ct_specific_var = np.array([V[i, i] * ((P[:, i] ** 2).mean()) for i in range(C)])
+    ct_specific_var = np.array([V[i, i] * (P[:, i] ** 2).mean() 
+                                for i in range(C)])
 
     return ct_overall_var, ct_specific_var
 
@@ -526,13 +737,15 @@ def cal_variance(beta: np.ndarray, P: np.ndarray, fixed_covars: dict,
     # calculate variance of fixed and random effects, and convert to dict
     beta_d, fixed_vars = fixedeffect_vars(beta, P, fixed_covars)  # fixed effects are always ordered
     random_vars = {}
-    if isinstance(list(r2.values())[0], float):
-        random_vars = RandomeffectVariance(r2, random_covars)
+    if len(r2.keys()) > 0:
+        if isinstance(list(r2.values())[0], float):
+            random_vars = RandomeffectVariance(r2, random_covars)
 
     return beta_d, fixed_vars, random_vars
 
 
-def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> float:
+def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, 
+                 n: Optional[int]=None, P: Optional[int]=None) -> float:
     """
     Wald test on mean expression differentiation
 
@@ -548,7 +761,12 @@ def wald_ct_beta(beta: np.ndarray, beta_var: np.ndarray, n: int, P: int) -> floa
     T = np.concatenate((np.eye(C - 1), (-1) * np.ones((C - 1, 1))), axis=1)
     beta = T @ beta
     beta_var = T @ beta_var @ T.T
-    return wald.mvwald_test(beta, np.zeros(C - 1), beta_var, n=n, P=P)
+    if n:
+        p = wald.mvwald_test(beta, np.zeros(C - 1), beta_var, n=n, P=P)
+    else:
+        p = wald.mvwald_test(beta, np.zeros(C - 1), beta_var, Ftest=False)
+
+    return p
 
 
 def check_R(R: np.ndarray) -> bool:
@@ -602,8 +820,10 @@ def order_by_randomcovariate(R: np.ndarray, Xs: list = [], Ys: dict = {}
     return index, R, new_Xs, new_Ys
 
 
-def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covars: dict = {},
-             random_covars: dict = {}, P: Optional[np.ndarray] = None, Kt: Optional[np.ndarray] = None) -> list:
+def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, 
+             fixed_covars: dict = {}, random_covars: dict = {}, 
+             P: Optional[np.ndarray] = None, K2: Optional[np.ndarray] = None
+             ) -> list:
     """
     Remove one individual from the matrices for jackknife
 
@@ -615,7 +835,7 @@ def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covar
         fixed_covars:   design matrix for Extra fixed effect
         random_covars:  design matrix for Extra random effect
         P:  cell type proportions
-        Kt: trans kinship matrix
+        K2: second kinship matrix
     Returns:
         a list of matrices after removing ith individual
     """
@@ -635,8 +855,8 @@ def jk_rmInd(i: int, Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, fixed_covar
     if P is not None:
         out.append(np.delete(P, i, axis=0))
     
-    if Kt is not None:
-        out.append(np.delete(np.delete(Kt, i, axis=0), i, axis=1))
+    if K2 is not None:
+        out.append(np.delete(np.delete(K2, i, axis=0), i, axis=1))
 
     return out
 
@@ -666,7 +886,7 @@ def generate_tmpfn() -> str:
     return tmpfn
 
 
-def subprocess_popen(cmd: list, log_fn: str = None) -> None:
+def subprocess_popen(cmd: list, log_fn: Optional[str] = None) -> None:
     """
     Run child process using Subprocess.Popen,
     while capture the stdout, stderr, and the exit code of the child process.
@@ -700,7 +920,7 @@ def subprocess_popen(cmd: list, log_fn: str = None) -> None:
 
     # print cmd. proc.args only work for >= python 3.3
     try:
-        print(' '.join(proc.args))
+        log.logger.info(' '.join(proc.args))
     except:
         pass
 
@@ -713,32 +933,34 @@ def subprocess_popen(cmd: list, log_fn: str = None) -> None:
             print(proc.returncode)
             raise Exception('child exception!')
     else:
-        log = open(log_fn, 'w')
-        log.write(stdout)
-        log.close()
+        ilog = open(log_fn, 'w')
+        ilog.write(stdout)
+        ilog.close()
         stdout = open(log_fn).read()
         sys.stdout.write(stdout)
         if proc.returncode != 0:
-            log = open(log_fn, 'w')
-            log.write(stderr)
-            log.close()
+            ilog = open(log_fn, 'w')
+            ilog.write(stderr)
+            ilog.close()
             stderr = open(log_fn).read()
-            log = open(log_fn, 'w')
-            log.write(stdout + '\n')
-            log.write('*' * 20 + '\n' + stderr + '*' * 20 + '\n')
-            log.close()
+            ilog = open(log_fn, 'w')
+            ilog.write(stdout + '\n')
+            ilog.write('*' * 20 + '\n' + stderr + '*' * 20 + '\n')
+            ilog.close()
             sys.stderr.write('*' * 20 + '\n' + stderr + '*' * 20 + '\n')
             print(proc.returncode)
             raise Exception('child exception!')
 
 
-def extract_vcf(input_f: str, panel_f: str = None, samples: npt.ArrayLike = None, samples_f: str = None,
-                pops: npt.ArrayLike = None, snps_f: str = None,
-                snps: npt.ArrayLike = None, maf_filter: bool = True, maf: str = '0.000000001',
-                geno: str = '1', output_bfile: str = None, bim_only: bool = False,
-                output_vcf_prefix: str = None, update_bim: bool = True,
-                ldprune: bool = False, ld_window_size: str = '50', ld_step_size: str = '5',
-                ld_r2_threshold: str = '0.2', memory: str = None, additional_operations: list = None
+def extract_vcf(input_f: str, panel_f: Optional[str] = None, samples: Optional[npt.ArrayLike] = None, 
+                samples_f: Optional[str] = None, pops: Optional[npt.ArrayLike] = None, 
+                snps_f: Optional[str] = None, snps: Optional[npt.ArrayLike] = None, 
+                maf_filter: bool = True, maf: Union[float, str] = '0.000000001',
+                geno: str = '1', output_bfile: Optional[str] = None, bim_only: bool = False,
+                ped: bool = False, output_vcf_prefix: Optional[str] = None, 
+                update_bim: bool = True, ldprune: bool = False, ld_window_size: str = '50', 
+                ld_step_size: str = '5', ld_r2_threshold: str = '0.2', memory: Optional[str] = None, 
+                additional_operations: Optional[list] = None
                 ) -> None:
     """
     Extract samples in pops from 1000G using PLINK (v 1.9).
@@ -820,6 +1042,8 @@ def extract_vcf(input_f: str, panel_f: str = None, samples: npt.ArrayLike = None
     if output_bfile:
         if bim_only:
             operations += ['--make-just-bim']
+        elif ped:
+            update_bim = False
         else:
             operations += ['--make-bed']
         subprocess_popen(['plink', '--out', output_bfile] + operations)
@@ -889,52 +1113,85 @@ def update_bim_snpname(bim_fn: str) -> None:
     bim.to_csv(bim_fn, sep='\t', index=False, header=False)
 
 
-def grm(bfile: str, chr: int, start: int, end: int, r: int, rel: str, tool: str = 'plink', format: str = 'bin') -> int:
+def grm(bfile: str, rel: Optional[str]=None, chr: Optional[int]=None, start: Optional[Union[int, List[int]]]=None, 
+        end: Optional[Union[int, List[int]]]=None, r: int=0, snps: Optional[list]=None, 
+        tool: str = 'plink', format: str = 'bin', nsnp_only: Optional[bool]=False
+        ) -> int:
     """
     Compute kinship matrix for a genomic region (start-r, end+r)
 
     Parameters:
         bfile:  prefix for chr/genome bed/bim files
+        rel:    prefix for relationship matrix file (prefix.rel.bin for plink, prefix.grm.bin for gcta)
         chr:    chromosome
         start:  start position of gene
         end:    end position of gene
         r:  radius to the gene
-        rel:    prefix for relationship matrix file (prefix.rel.bin for plink, prefix.grm.bin for gcta)
+        snps:   SNPs to calculate kinship
         tool:   plink or gcta to compute grm
         format: output format for plink
     Returns:
         number of snps in the regions
     """
-    start = max(0, start - r)
-    end = end + r
+    if snps is None:
+        bim = pd.read_csv(bfile + '.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp', 'a1', 'a2'])
 
-    # check number of SNPs in the region
-    bim = pd.read_csv(bfile + '.bim', sep='\s+', names=['chr', 'snp', 'cm', 'bp', 'a1', 'a2'])
-    nsnp = bim.loc[(bim['chr'] == chr) & (bim['bp'] > start) & (bim['bp'] < end)].shape[0]
+        if isinstance(start, int) and isinstance(end, int):
+            start = max(0, start - r)
+            end = end + r
+
+            # check number of SNPs in the region
+            snps = bim.loc[(bim['chr'] == chr) & (bim['bp'] >= start) & (bim['bp'] <= end), 'snp'].tolist()
+        elif isinstance(start, list) and isinstance(end, list):
+            snps = []
+            for x, y in zip(start, end):
+                x = max(0, x - r)
+                y = y + r
+
+                # check number of SNPs in the region
+                snps += bim.loc[(bim['chr'] == chr) & (bim['bp'] >= x) & (bim['bp'] <= y), 'snp'].tolist()
+        else:
+            log.logger.info('Wrong input!')
+            print(start, end)
+            sys.exit(-1)
+
+    nsnp = len(snps)
+
+    if nsnp_only:
+        return nsnp
+
+    tmpdir = tempfile.mkdtemp()
+    tmp = os.path.join(tmpdir, 'tmp')
+
+    snp_f = tmp + '.snps'
+    with open(snp_f, 'w') as f:
+        f.write('\n'.join(snps))
+
+    if rel is None:
+        rel = tmp + '.rel'
 
     # compute kinship matrix
     if nsnp > 0:
         if tool == 'plink':
             if format == 'bin':
-                cmd = ['plink', '--bfile', bfile,
-                    '--chr', chr, '--from-bp', start, '--to-bp', end,
+                cmd = ['plink', '--bfile', bfile, '--extract', snp_f,
                     '--make-rel', 'bin',
                     '--out', rel]
             elif format == 'gz':
-                cmd = ['plink', '--bfile', bfile,
-                    '--chr', chr, '--from-bp', start, '--to-bp', end,
+                cmd = ['plink', '--bfile', bfile, '--extract', snp_f,
                     '--make-rel', 'gz',
                     '--out', rel]
             subprocess_popen(cmd)
         elif tool == 'gcta':
             tmp = generate_tmpfn()
-            cmd = ['plink', '--bfile', bfile,
-                   '--chr', chr, '--from-bp', start, '--to-bp', end,
+            cmd = ['plink', '--bfile', bfile, '--extract', snp_f,
                    '--make-bed', '--out', tmp]
             subprocess_popen(cmd)
             cmd = ['gcta', '--bfile', tmp,
                    '--make-grm', '--out', rel]
             subprocess_popen(cmd)
+    
+    shutil.rmtree(tmpdir)
 
     return nsnp
 
@@ -962,7 +1219,7 @@ def transform_grm(grm: np.ndarray) -> np.ndarray:
     return grm2
 
 
-def sort_grm(grm: np.ndarray, old_order: List, new_order: npt.ArrayLike) -> np.ndarray:
+def sort_grm(grm: npt.NDArray[np.float64], old_order: list, new_order: list) -> np.ndarray:
     """
     Sort grm accordding to the order of individuals in new_order
 
@@ -971,13 +1228,68 @@ def sort_grm(grm: np.ndarray, old_order: List, new_order: npt.ArrayLike) -> np.n
     new_order:  new order of individuals
     """
 
-    grm = pd.DataFrame(grm.tolist(), index=old_order, columns=old_order)
+    new_grm = pd.DataFrame(grm, index=old_order, columns=old_order)
 
-    return grm.loc[new_order, new_order].to_numpy()
+    return new_grm.loc[new_order, new_order].to_numpy()
     
 
-def design(inds: npt.ArrayLike, pca: Optional[pd.DataFrame] = None, PC: Optional[int] = None, cat: Optional[pd.Series] = None,
-           con: Optional[pd.Series] = None, drop_first: bool = True) -> Optional[np.ndarray]:
+def grm_matrix2gcta_grm_gz(grm: np.ndarray, grm_prefix: str, 
+                        inds: Optional[list]=None, 
+                        nsnp: Union[int, List[int]]=10,) -> None:
+    """
+    Write grm matrix to gcta grm.gz file
+
+    Parameters:
+        grm:    2d grm
+        grm_prefix:  prefix for grm file
+        inds:   order of individuals in input grm matrix;
+                if None, names individuals as ind1, ind2, ind3, etc.
+        nsnp:   number of snps to write to grm file
+    """
+
+    if inds is None:
+        inds = [f'ind{i+1}' for i in range(grm.shape[0])]
+    np.savetxt(grm_prefix + '.grm.id', np.array([inds, inds]).T, fmt='%s')
+
+    # Get the lower triangle indices
+    indices = np.tril_indices(grm.shape[0])
+
+    # Create a 1D array from the lower triangle elements
+    lower_triangle = grm[indices]
+
+    # Merge lower triangle elements with indices
+    if isinstance(nsnp, int):
+        nsnp = np.ones_like(lower_triangle) * nsnp
+
+    new_grm = np.column_stack((indices[0] + 1, indices[1] + 1, nsnp, lower_triangle))
+    np.savetxt(grm_prefix + '.grm.gz', new_grm, fmt='%d %d %d %.6f', delimiter='\t')
+
+    # return inds
+    return inds
+
+
+def read_greml(f: str) -> dict:
+    """
+    Read GREML output file
+
+    Parameters:
+        f:  GREML output file
+
+    Returns:
+        GREML results
+    """
+    
+    out = {}
+    for line in open(f):
+        if re.search(r'V\(', line):
+            line = line.strip().split()
+            out[line[0]] = {'variance': float(line[1]), 'se': float(line[2])}
+
+    return out
+            
+
+def construct_design(inds: list, pca: Optional[pd.DataFrame] = None, PC: Optional[int] = None, cat: Optional[pd.Series] = None,
+           con: Optional[pd.Series] = None, drop_first: bool = True) -> np.ndarray:
     """
     Construct design matrix
 
@@ -998,9 +1310,11 @@ def design(inds: npt.ArrayLike, pca: Optional[pd.DataFrame] = None, PC: Optional
         pcs = [f'PC{i}' for i in range(1, PC + 1)]
         return pca.loc[inds, pcs].to_numpy()
     elif cat is not None:
-        return pd.get_dummies(cat, drop_first=drop_first).loc[inds, :].to_numpy()
+        return pd.get_dummies(cat, drop_first=drop_first, dtype=float).loc[inds, :].to_numpy()
     elif con is not None:
         return con[inds].to_numpy()
+    else:
+        return np.zeros((len(inds), 1))
 
 
 def L_f(C: int, c1: int, c2: int) -> np.ndarray:
@@ -1010,27 +1324,177 @@ def L_f(C: int, c1: int, c2: int) -> np.ndarray:
     return L
 
 
-def compute_h2(hom_g2: np.ndarray, V: np.ndarray, hom_e2: np.ndarray, W: np.ndarray) -> np.ndarray:
+def compute_h2_pergene(hom_g2: float, V: Union[float, np.ndarray], hom_e2: float, 
+                       W: Union[float, np.ndarray]) -> Tuple[float, float]:
+    '''
+    Compute h2 for one gene
+    '''
+    shared_h2 = None
+    specific_h2 = None
+    
+    if isinstance(V, float):
+        shared_h2 = hom_g2 / (hom_g2 + V + hom_e2 + W)
+        specific_h2 = V / (hom_g2 + V + hom_e2 + W)
+    else:
+        mean_V = np.diag(V).mean()
+        mean_W = np.diag(W).mean()
+
+        shared_h2 = hom_g2 / (hom_g2 + mean_V + hom_e2 + mean_W)
+        specific_h2 = mean_V / (hom_g2 + mean_V + hom_e2 + mean_W)
+
+    return shared_h2, specific_h2
+
+
+def compute_h2(hom_g2: np.ndarray, V: np.ndarray, hom_e2: np.ndarray, 
+               W: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute h2 across transcriptome
-    First column is the shared heritability, following columns are the ct specific heritability,
     """
 
-    sig_g2s = V + hom_g2[:, np.newaxis, np.newaxis]
-    sig_g2s = np.diagonal(sig_g2s, axis1=1, axis2=2)
-    sig_e2s = W + hom_e2[:, np.newaxis, np.newaxis]
-    sig_e2s = np.diagonal(sig_e2s, axis1=1, axis2=2)
+    mean_V = np.diagonal(V, axis1=1, axis2=2).mean(axis=1)
+    mean_W = np.diagonal(W, axis1=1, axis2=2).mean(axis=1)
 
     # calculate heritability
-    sig2s = sig_g2s + sig_e2s
+    sig2s = hom_g2 + mean_V + hom_e2 + mean_W
 
     # ct specific
-    ct_h2s = sig_g2s / sig2s
+    shared_h2s = hom_g2 / sig2s
+    specific_h2s = mean_V / sig2s
 
-    # shared
-    shared_h2s = np.mean(sig_g2s, axis=1) / np.mean(sig2s, axis=1)
+    return shared_h2s, specific_h2s
 
-    # merge
-    h2s = np.insert(ct_h2s, 0, shared_h2s, axis=1)
 
-    return h2s
+def read_ensembl(f: str) -> pd.DataFrame:
+    res = {'gene':[], 'ensembl':[], 'hgnc':[], 'chr':[], 'start':[], 'end':[]}
+    for line in gzip.open(f, 'rt'):
+        if line[0] != '#':
+            line = line.strip().split('\t')
+            if line[2] in ['gene', 'pseudogene', 'RNA', 'lincRNA_gene', 'snRNA_gene', 'miRNA_gene', 'processed_transcript'] and line[0].isdigit():
+                try:
+                    chr, start, end, info = int(line[0]), int(line[3]), int(line[4]), line[-1]
+                    # get hgnc id
+                    if '[Source:HGNC Symbol' in info:
+                        hgnc = info.split('[Source:HGNC Symbol')[1]
+                        hgnc = hgnc.split(']')[0]
+                        hgnc = hgnc.split(':')[1]
+                    else:
+                        hgnc = 'NA'
+                    res['hgnc'].append(hgnc)
+
+                    info = info.split(';')
+                    tmp = {}
+                    for x in info:
+                        x = x.split('=')
+                        tmp[x[0]] = x[1]
+                    info = tmp
+                    res['gene'].append(info['Name'])
+                    if 'gene_id' in info.keys():
+                        res['ensembl'].append(info['gene_id'])
+                    else:
+                        res['ensembl'].append('NA')
+                    res['chr'].append(chr)
+                    res['start'].append(start) 
+                    res['end'].append(end)
+                except:
+                    log.logger.info('\t'.join(line))
+                    sys.exit()
+
+    res = pd.DataFrame(res)
+
+    # sanity check duplicated name or id
+    duplicated_gene = (res['gene'].count() != res['gene'].nunique())
+    duplicated_ensembl = (res['ensembl'].count() != res['ensembl'].nunique())
+    duplicated_hgnc = (res['hgnc'].count() != res['hgnc'].nunique())
+    if duplicated_gene:
+        genes, counts = np.unique(res['gene'], return_counts=True)
+        print('Duplicated genes:', genes[counts > 1])
+    if duplicated_ensembl:
+        ids, counts = np.unique(res['ensembl'], return_counts=True, equal_nan=False)
+        print('Duplicated Ensembl ID:', ids[counts > 1])
+    if duplicated_hgnc:
+        ids, counts = np.unique(res['hgnc'], return_counts=True, equal_nan=False)
+        print('Duplicated HGNC ID:', ids[counts > 1])
+
+    return res
+
+
+def h2_equal_test(formula: List[str], var: Union[np.ndarray, list], cov: np.ndarray, 
+                  ct_h2: np.ndarray) -> float:
+    '''
+    Delta method to test equal h2 across cell types
+
+    Parameters:
+        formula:    a formula mapping from variance to h2, e.g. '~(x1)/(x1+x2)'
+                    x1, x2 indicate the first and second element in mean
+        var:    estimates of variance parameters, e.g. genetic variance, environment variance
+        cov:    estiamted covariance matrix of variance parameters
+
+    Returns:
+        p value for ct-specific h2
+    '''
+
+    # convert string to R list of formula
+    formula_fun = r('function(x) as.formula(x)')
+    formula = ro.StrVector(formula)
+    formula = r['lapply'](formula, formula_fun)
+
+    numpy2ri.activate()
+
+    h2Covmat = r('msm::deltamethod')(formula, var, cov, ses=False)
+
+    numpy2ri.deactivate()
+
+    # test h2
+    p = wald_ct_beta(ct_h2, h2Covmat)  # NOTE: using chi-square test
+
+    return p
+
+
+def _op_partition_mean(beta: np.ndarray, S: np.ndarray, ) -> float:
+    """
+    Compute OP partition of cell type fixed effect
+
+    Parameters:
+        beta:   estimated cell type means
+        S:      estimated covariance of cell type proportions
+
+    Returns:
+        OP partition of cell type fixed effect
+    """
+    return beta @ S @ beta
+
+
+def _op_partition_specific_effect(X: np.ndarray, S: np.ndarray, pi: np.ndarray, ) -> float:
+    """
+    Compute OP partition of cell type specific genetic variance
+
+    Parameters:
+        X:      estimated genetic variance (V) or environmental variance (W)
+        S:      estimated covariance of cell type proportions
+        pi:     estimated mean cell type proportions
+
+    Returns:
+        OP partition of cell type specific genetic variance
+    """
+    return np.trace(X @ S) + pi @ X @ pi
+
+
+def op_partition(beta: np.ndarray, V: np.ndarray, W: np.ndarray, S: np.ndarray, 
+                 pi: np.ndarray, ) -> dict:
+    """
+    Comptued variance partition of OP for cell type fixed effect, 
+    ct-specific genetic, and ct-specific environmental variance
+
+    Parameters:
+        beta:   estimated cell type means
+        V:      estimated genetic variance
+        W:      estimated environmental variance
+        S:      estimated covariance of cell type proportions
+        pi:     estimated mean cell type proportions
+
+    Returns:
+        a dictionary of variance components
+    """
+    return {'ct_fixed_effect': _op_partition_mean(beta, S),
+            'ct_specific_gen': _op_partition_specific_effect(V, S, pi),
+            'ct_specific_env': _op_partition_specific_effect(W, S, pi)}

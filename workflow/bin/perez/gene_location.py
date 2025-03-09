@@ -5,7 +5,8 @@ from gxctmm import util
 
 def main():
     #
-    genes = pd.read_table(snakemake.input.genes)
+    genes = pd.read_table(snakemake.input.genes, usecols=['feature', 'GeneSymbol'])
+
     gene_info = pd.read_table(snakemake.input.gene_info)
     gene_info = gene_info.rename(columns={'chromosome_name':'chr', 'start_position':'start', 'end_position':'end'})
     gene_info['tss'] = gene_info['transcript_start']
@@ -13,9 +14,9 @@ def main():
 
     # merge
     genes = genes.merge(gene_info, left_on=['feature', 'GeneSymbol'], right_on=['ensembl_gene_id', 'hgnc_symbol'])
-    genes = genes.drop(columns=['features', 'ensembl_gene_id', 'hgnc_symbol'])
+    genes = genes.drop(columns=['ensembl_gene_id', 'hgnc_symbol'])
 
-    # drop 6 genes with identical location
+    # drop X genes with identical location
     grouped = genes.groupby(['chr', 'start', 'end'])
     dup_genes = grouped.filter(lambda x: x['feature'].nunique() > 1)
     print(dup_genes)
