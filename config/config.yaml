@@ -1,0 +1,47 @@
+
+colorpalette: bright
+
+sim:
+  # color for expected values
+  pointcolor: red
+  replicates: 1000
+  batch_no: 500
+  noise_alpha: [0.1, 0.5, 20]
+
+
+yazar:
+  yazar_ind_col: individual
+  yazar_ct_col: cell_label
+  yazar_pool_col: pool
+  he_nbatch: 500
+  reml_nbatch: 4000
+  radius: 5e5   # cis region size
+  maf: 0.05
+  gwas:
+    # traits from Perez
+    # negative
+    Height: data/ldsc/gwas/alkes/PASS_Height1.sumstats
+    CAD: data/ldsc/gwas/alkes/PASS_Coronary_Artery_Disease.sumstats
+    SCZ: data/ldsc/gwas/alkes/PASS_Schizophrenia.sumstats
+    # positive (still missing Ezcema. Perez didn't use Lupus from Alkes)
+    UC: data/ldsc/gwas/alkes/PASS_Ulcerative_Colitis.sumstats
+    RA: data/ldsc/gwas/alkes/PASS_Rheumatoid_Arthritis.sumstats
+    PBC: data/ldsc/gwas/alkes/PASS_Primary_biliary_cirrhosis.sumstats
+    MS: data/ldsc/gwas/alkes/PASS_Multiple_sclerosis.sumstats
+    IBD: data/ldsc/gwas/alkes/PASS_IBD.sumstats  # doesn't have A1/A2 columns
+    Crohns: data/ldsc/gwas/alkes/PASS_Crohns_Disease.sumstats
+    Celiac: data/ldsc/gwas/alkes/PASS_Celiac.sumstats
+    Lupus: data/ldsc/gwas/alkes/PASS_Lupus.sumstats
+
+
+perez:
+  he_nbatch: 500
+  reml_nbatch: 10000
+  radius: 5e5   # cis region size
+
+
+ldsc:
+  mhc:
+    chr: 6
+    start: 28477797
+    end: 33448354

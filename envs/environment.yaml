@@ -2,8 +2,8 @@ channels:
     - conda-forge
     - bioconda
 dependencies:
-    - python
-    - snakemake
+    - python=3.11.5
+    - snakemake=7.32.4
     - ipython
     - jupyter
     - numpy
@@ -13,20 +13,30 @@ dependencies:
     - seaborn
     - rpy2
     - scanpy
-    - r-biocmanager
-    - r-sceasy
-    - r-devtools
-    - r-seurat
-    - r-sctransform
-    - bioconductor-glmgampoi
-    - bioconductor-muscat
-    - bioconductor-transformgampoi
-    - zarr
-    - dask
-    - memory_profiler
-    - scikit-learn
+    - biopython
+    #- r-biocmanager
+    #- r-sceasy
+    #- r-devtools
+    #- r-seurat
+    #- r-sctransform
+    #- bioconductor-glmgampoi
+    #- bioconductor-muscat
+    #- bioconductor-transformgampoi
+    #- bioconductor-clusterprofiler
+    #- bioconductor-annotationhub
+    #- bioconductor-biomart
     - r:r
-    - r:r-softImpute
+    - r-msm
+    - rdata
+    #
+    #- zarr
+    #- dask
+    #- memory_profiler
+    #- tensorflow-gpu  # check tensorflow for instruction to support gpu. I installed using pip after loading cuda
+    #- tensorflow-probability
+    #- jax  # installed using pip
+    #- r:r-softImpute
+    #- scikit-learn
     #- pandas-plink
     #- r:BiocManager::install("transformGamPoi")
     #- r:Seurat

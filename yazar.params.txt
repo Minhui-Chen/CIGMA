@@ -1,13 +1,11 @@
 # ind_min_cellnum:  exclude individuals <= number of cells
 # ct_min_cellnum: For cts <= ct_min_cellnum, set nu and y to missing. only keep cts with > prop non-missing values
-ind_min_cellnum	ct_min_cellnum	prop	sex	PC	experiment	disease
-#10	10	0.98	Y	6	R	Y
-#10	10	0.95	Y	6	R	Y
-10	10	0.9	Y	6	R	Y
-#10	100	0.9	Y	6	R	Y
-#10	50	0.9	Y	6	R	Y
-#10	50	0.6	Y	6	R	Y
-#10	50	0.5	Y	6	R	Y
-#10	20	0.9	Y	6	R	Y
-#10	20	0.6	Y	6	R	Y
-#10	20	0.5	Y	6	R	Y
+ind_min_cellnum	ct_min_cellnum	prop	geno_pca_n	op_pca_n	batch	fixed
+10	10	0.9	6	1	shared	shared
+#10	10	0.9	8	1	shared	shared
+#10	10	0.9	4	1	shared	shared
+#10	10	0.9	6	1	specific	shared
+#10	10	0.9	6	1	shared	specific
+#10	10	0.9	6	1	specific	specific
+#10	20	0.8	6	1	shared	shared
+#10	30	0.6	6	1	shared	shared

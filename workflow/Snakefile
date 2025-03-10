@@ -3,6 +3,7 @@ import sys, os, re, time, shutil, gzip
 import numpy as np, pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy import sparse
 
 from snakemake.utils import Paramspace 
 
@@ -21,7 +22,18 @@ chrs = range(1, 23)
 
 
 # wildcard constraints
+wildcard_constraints: fixed = '\w+'
+wildcard_constraints: random = '\w+'
 wildcard_constraints: i='[0-9]+'
+wildcard_constraints: k='[0-9]+'
+wildcard_constraints: rep='[0-9]+'
+wildcard_constraints: n='[0-9]+'
+wildcard_constraints: geno_pca_n='\d+'
+wildcard_constraints: op_pca_n='\d+'
+wildcard_constraints: maxit='[0-9]+'
+wildcard_constraints: reltol='[^/]+'
+# wildcard_constraints: p='[\d\w\.]+'
+wildcard_constraints: p='[^/]+'
 wildcard_constraints: window = '[0-9]+'
 wildcard_constraints: l='[^/]+'
 wildcard_constraints: r='[^/]+'
@@ -33,6 +45,14 @@ wildcard_constraints: alpha='[^/]+'
 wildcard_constraints: prop='[^/]+'
 wildcard_constraints: lam='[^/]+'
 wildcard_constraints: h2='[^/]+'
+wildcard_constraints: anc='\w+'
+wildcard_constraints: status='\w+'
+wildcard_constraints: gwas='\w+'
+wildcard_constraints: ct_random='\w+'
+wildcard_constraints: ct_fixed='\w+'
+wildcard_constraints: ctnu='\w+'
+wildcard_constraints: cell_no='[\d\w]+'
+wildcard_constraints: cell_prop='[\d\w\.]+'
 
 
 
@@ -41,6 +61,7 @@ wildcard_constraints: h2='[^/]+'
 include: 'rules/common.smk'
 include: 'rules/sim.smk'
 include: 'rules/yazar.smk'
+include: 'rules/yazar_sim.smk'
+# include: 'dev/yazar.smk'
 include: 'rules/perez.smk'
-include: 'yazar.smk'
-include: 'dev.smk'
+include: 'dev/dev.smk'
