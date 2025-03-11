@@ -27,7 +27,7 @@ rule get_biomart_v75:
     # only keep autosomes
     output:
         gene_info = 'analysis/data/Homo_sapiens.GRCh37.75.txt',
-    script: '../scripts/utils/get_biomart_v75.R'
+    script: '../bin/utils/get_biomart_v75.R'
 
 
 # data preprocessing
@@ -918,42 +918,6 @@ rule yazar_gcta_greml_op_merge:
                     if h2 is None:
                         h2 = v_g / (v_g + v_e)
                     f.write(f'{gene}\t{h2}\t{pval}\n')
-
-
-# # NOTE: backup without correcting P
-# rule yazar_gcta_greml_op_without_correcting_P:
-#     input:
-#         op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.final.gz',
-#         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.batch{{i}}.txt',
-#         op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
-#         geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
-#         obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
-#     output:
-#         out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/without_correcting_P/op.greml.batch{{i}}',
-#     params:
-#         out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/without_correcting_P/rep/op.hsq',
-#         snps = 5, # threshold of snp number per gene
-#     resources:
-#         mem_mb = '2G',
-#     shell:
-#         '''
-#         module load gcc/11.3.0 gcta/1.94.1
-#         python3 workflow/scripts/yazar/gcta_greml_op.without_correcting_P.py \
-#                 {input.op} {input.kinship} \
-#                 {input.op_pca} {wildcards.op_pca_n} \
-#                 {input.geno_pca} {wildcards.geno_pca_n} \
-#                 {input.obs} {params.snps} {params.out} {output.out}
-#         '''
-
-
-# use rule yazar_gcta_greml_op_merge as yazar_gcta_greml_op_merge_without_correcting_P with:
-#     input:
-#         out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/without_correcting_P/op.greml.batch{i}'
-#                 for i in range(yazar_he_batches)],
-#     output:
-#         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta/without_correcting_P/op.greml',
-
-
 
 
 rule yazar_ldsc_make_geneset:
