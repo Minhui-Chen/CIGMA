@@ -268,7 +268,7 @@ use rule yazar_exclude_repeatedpool as perez_exclude_repeatedpool with:
         pool_col = perez_pool_col,
 
 
-use rule yazar_ctp_extractX as perez_ctp_extractX with:
+use rule yazar_ctp_transform as perez_ctp_transform with:
     input:
         h5ad = 'analysis/perez/data/{anc}.{status}.h5ad',
         var = 'analysis/perez/data/{anc}.{status}.var.gz',
@@ -453,51 +453,6 @@ use rule yazar_HE_togz as perez_HE_free_togz with:
         P = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/P.final.gz',
     output:
         out = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.gz',
-
-
-use rule yazar_HE_Free_plot as perez_HE_Free_plot with:
-    input:
-        P = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/P.final.gz',
-        out = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.npy',
-    output:
-        h2 = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.free.h2.png',
-        h2_violin = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.free.h2.violin.png',
-        dist = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.free.h2.dist.png',
-    params:
-        order = perez_ct_order,
-        colors = perez_colors,
-
-
-use rule yazar_HE_Free_VW_plot as perez_HE_Free_VW_plot with:
-    input:
-        P = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/P.final.gz',
-        out = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.npy',
-    output:
-        png = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.free.VW.png',
-        png2 = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.free.VW.violin.png',
-    params:
-        order = perez_ct_order,
-        colors = perez_colors,
-
-
-use rule yazar_HE_Full_plot as perez_HE_Full_plot with:
-    input:
-        P = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/P.final.gz',
-        out = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.npy',
-    output:
-        cov = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.full.cov.png',
-        h2 = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.full.h2.png',
-
-
-use rule yazar_HE_Full_VW_plot as perez_HE_Full_VW_plot with:
-    input:
-        P = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/P.final.gz',
-        out = f'analysis/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.npy',
-    output:
-        png = f'results/perez/{perez_paramspace.wildcard_pattern}/{{anc}}.{{status}}/he.full.VW.png',
-    params:
-        order = perez_ct_order,
-        colors = perez_colors,
 
 
 rule perez_HE_Free_meta:

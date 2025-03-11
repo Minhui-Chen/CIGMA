@@ -39,6 +39,10 @@ GxCTMM
 
 A longer description of your project goes here...
 
+* Download GWAS data from ... and update the path in the [config](config/config.yaml) file.
+* Download LDSC: git clone https://github.com/bulik/ldsc.git
+
+
 
 .. _pyscaffold-notes:
 
