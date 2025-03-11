@@ -17,6 +17,7 @@ dependencies:
     - r:r
     - r-msm
     - rdata
-    - r-biomart
+    - bioconductor-biomart
+    - pip
     - pip:
         - gxctmm
