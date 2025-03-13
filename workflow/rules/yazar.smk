@@ -124,7 +124,7 @@ rule yazar_ctp:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
     resources:
-        mem_mb = '80G',
+        mem_mb = '120G',
     run:
         from scipy import sparse
         from gxctmm import preprocess
