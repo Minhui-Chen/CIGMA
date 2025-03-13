@@ -106,7 +106,7 @@ rule yazar_ctp_transform:
         ct_col = yazar_ct_col,
         pool_col = yazar_pool_col,
     resources:
-        mem_mb = '90G',
+        mem_mb = '120G',
     script: '../bin/yazar/transform.py'
 
 
