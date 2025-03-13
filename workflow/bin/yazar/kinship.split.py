@@ -27,7 +27,7 @@ def main():
                 continue
             
             with gzip.open(ctp_f, 'rt') as ctp_file:
-                genes = ctp_file.readline().strip().split()[2:]
+                genes = np.array(ctp_file.readline().strip().split()[2:])
             
             kinship = {'ids': data['ids'], 'gene': [], 'K': [], 'nsnp': []}
 

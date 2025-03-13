@@ -313,7 +313,7 @@ rule yazar_rm_rareINDnCT:
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/P.final.gz',
         n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/n.final.gz',
     resources:
-        mem_mb = '10G',
+        mem_mb = '20G',
     script: '../bin/yazar/rm_rareINDnCT.py'
 
 
@@ -547,7 +547,7 @@ rule yazar_HE_split:
     resources:
         mem_mb = '10G',
     run:
-        meta = pd.read_table(input.genes, usecols=['feature', 'chr'])
+        me  ta = pd.read_table(input.genes, usecols=['feature', 'chr'])
         meta = meta.drop_duplicates()
         ctp = pd.read_table(input.ctp, index_col=(0,1))
         ctnu = pd.read_table(input.ctnu, index_col=(0,1))
