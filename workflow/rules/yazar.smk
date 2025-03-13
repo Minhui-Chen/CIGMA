@@ -547,7 +547,7 @@ rule yazar_HE_split:
     resources:
         mem_mb = '10G',
     run:
-        me  ta = pd.read_table(input.genes, usecols=['feature', 'chr'])
+        meta = pd.read_table(input.genes, usecols=['feature', 'chr'])
         meta = meta.drop_duplicates()
         ctp = pd.read_table(input.ctp, index_col=(0,1))
         ctnu = pd.read_table(input.ctnu, index_col=(0,1))
