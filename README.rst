@@ -37,7 +37,7 @@ GxCTMM
 GxCTMM is a Python package for the decomposition of cell type-shared and -specific eQTLs using the CIGMA model.
 For a full description of CIGMA, please refer to the original paper: https://doi.org/10.1101/2023.08.01.551679.
 
-This repository contains scripts for data analyses in our paper. `Snakemake files <workflow/rules>`_ contains steps for running CIGMA model on simulated and real data.
+This repository contains scripts for data analyses in our paper. `Snakemake files <workflow/rules>`_ contain steps for running CIGMA model on simulated and real data.
 
 .. * Download GWAS data from ... and update the path in the [config](config/config.yaml) file.
 .. * Download LDSC: git clone https://github.com/bulik/ldsc.git
@@ -48,19 +48,22 @@ Installation
 The conda env is defined in the `environment.yml <env/environment.yml>`_ file.
 
 To create the conda environment, run:
+
 ```bash
-conda env create -n gxct -f environment.yml
+conda env create -n gxct -f env/environment.yml
 conda activate gxct
 ```
 
 
 To only install the GxCTMM Python package, run:
+
 ```bash
 pip install gxctmm
 ```
 
 
 To run the tests, run:
+
 ```bash
 python3 tests/test.py
 ```
@@ -70,7 +73,7 @@ python3 tests/test.py
 
 Input data
 ======
-Please check the [test script](tests/test.py) for CIGMA input data and running examples.
+Please check the `test script <tests/test.py>`_ for CIGMA input data and running examples.
 
 Note
 ====
