@@ -1,27 +1,27 @@
 .. These are examples of badges you might want to add to your README:
    please update the URLs accordingly
 
-    .. image:: https://api.cirrus-ci.com/github/<USER>/GxCTMM.svg?branch=main
+    .. image:: https://api.cirrus-ci.com/github/<USER>/CIGMA.svg?branch=main
         :alt: Built Status
-        :target: https://cirrus-ci.com/github/<USER>/GxCTMM
-    .. image:: https://readthedocs.org/projects/GxCTMM/badge/?version=latest
+        :target: https://cirrus-ci.com/github/<USER>/CIGMA
+    .. image:: https://readthedocs.org/projects/CIGMA/badge/?version=latest
         :alt: ReadTheDocs
-        :target: https://GxCTMM.readthedocs.io/en/stable/
-    .. image:: https://img.shields.io/coveralls/github/<USER>/GxCTMM/main.svg
+        :target: https://CIGMA.readthedocs.io/en/stable/
+    .. image:: https://img.shields.io/coveralls/github/<USER>/CIGMA/main.svg
         :alt: Coveralls
-        :target: https://coveralls.io/r/<USER>/GxCTMM
-    .. image:: https://img.shields.io/pypi/v/GxCTMM.svg
+        :target: https://coveralls.io/r/<USER>/CIGMA
+    .. image:: https://img.shields.io/pypi/v/CIGMA.svg
         :alt: PyPI-Server
-        :target: https://pypi.org/project/GxCTMM/
-    .. image:: https://img.shields.io/conda/vn/conda-forge/GxCTMM.svg
+        :target: https://pypi.org/project/CIGMA/
+    .. image:: https://img.shields.io/conda/vn/conda-forge/CIGMA.svg
         :alt: Conda-Forge
-        :target: https://anaconda.org/conda-forge/GxCTMM
-    .. image:: https://pepy.tech/badge/GxCTMM/month
+        :target: https://anaconda.org/conda-forge/CIGMA
+    .. image:: https://pepy.tech/badge/CIGMA/month
         :alt: Monthly Downloads
-        :target: https://pepy.tech/project/GxCTMM
+        :target: https://pepy.tech/project/CIGMA
     .. image:: https://img.shields.io/twitter/url/http/shields.io.svg?style=social&label=Twitter
         :alt: Twitter
-        :target: https://twitter.com/GxCTMM
+        :target: https://twitter.com/CIGMA
 
 .. image:: https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold
     :alt: Project generated with PyScaffold
@@ -44,7 +44,7 @@ This repository contains scripts for data analyses in our paper. `Snakemake file
 
 
 Installation
-======
+============
 The conda env is defined in the `environment.yml <env/environment.yml>`_ file.
 
 To create the conda environment, run:
@@ -72,7 +72,7 @@ python3 tests/test.py
 .. _pyscaffold-notes:
 
 Input data
-======
+==========
 Please check the `test script <tests/test.py>`_ for CIGMA input data and running examples.
 
 Note
