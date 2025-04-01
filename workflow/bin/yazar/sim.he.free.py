@@ -1,6 +1,6 @@
 import re, os, sys
 import numpy as np, pandas as pd
-from gxctmm import log, fit, util
+from cigma import log, fit, util
 
 
 def main():

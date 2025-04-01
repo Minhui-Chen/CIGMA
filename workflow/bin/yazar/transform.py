@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy import sparse
-from gxctmm import preprocess
+from cigma import preprocess
 
 
 def main():

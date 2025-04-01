@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import chi2
-from gxctmm import wald
+from cigma import wald
 
 
 def inv_variance_meta(Ps, outs):

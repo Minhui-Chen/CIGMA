@@ -1,6 +1,6 @@
 import re, time, os
 import numpy as np
-from gxctmm import util
+from cigma import util
 
 ## list to array
 def list2array(dic):

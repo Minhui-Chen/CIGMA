@@ -127,7 +127,7 @@ rule yazar_ctp:
         mem_mb = '120G',
     run:
         from scipy import sparse
-        from gxctmm import preprocess
+        from cigma import preprocess
 
         X = sparse.load_npz(input.X)
         obs = pd.read_table(input.obs, index_col=0)
@@ -359,7 +359,7 @@ rule yazar_std_op:
     resources:
         mem_mb = '10G',
     run:
-        from gxctmm import preprocess
+        from cigma import preprocess
         ctp = pd.read_table(input.ctp, index_col=(0,1)).astype('float32')
         ctnu = pd.read_table(input.ctnu, index_col=(0,1)).astype('float32')
         P = pd.read_table(input.P, index_col=0)

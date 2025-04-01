@@ -1,6 +1,6 @@
 import sys, os, re, tempfile, shutil
 import numpy as np, pandas as pd
-from gxctmm import util
+from cigma import util
 
 def main():
     # read

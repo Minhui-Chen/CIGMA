@@ -1,5 +1,5 @@
 import numpy as np, pandas as pd
-from gxctmm import log, fit
+from cigma import log, fit
 
 
 def main():

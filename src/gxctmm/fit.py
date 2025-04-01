@@ -538,7 +538,7 @@ def _reml(model:str, par: Optional[list], Y: np.ndarray, K: np.ndarray,
         np.savetxt(K_f, K, delimiter='\t')
         np.savetxt(ctnu_f, ctnu, delimiter='\t')
 
-        cmd = ['Rscript', 'src/gxctmm/reml.R', '--Y', y_f, '--X', X_f, 
+        cmd = ['Rscript', 'src/cigma/reml.R', '--Y', y_f, '--X', X_f, 
                '--K1', K_f, '--vs', ctnu_f, '--out', out_f]
         if K2 is not None:
             K2_f = tmp_f + '.K2.gz'

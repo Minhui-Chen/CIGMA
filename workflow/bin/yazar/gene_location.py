@@ -1,6 +1,4 @@
-import gzip, re, sys
 import numpy as np, pandas as pd
-from gxctmm import util
 
 
 def main():

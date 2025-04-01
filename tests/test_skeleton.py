@@ -1,6 +1,6 @@
 import pytest
 
-from gxctmm.skeleton import fib, main
+from cigma.skeleton import fib, main
 
 __author__ = "Minhui-Chen"
 __copyright__ = "Minhui-Chen"

@@ -1,5 +1,5 @@
 """
-    Setup file for GxCTMM.
+    Setup file for CIGMA.
     Use setup.cfg to configure your project.
 
     This file was generated with PyScaffold 4.4.

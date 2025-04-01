@@ -20,4 +20,4 @@ dependencies:
     - bioconductor-biomart
     - pip
     - pip:
-        - gxctmm
+        - cigma

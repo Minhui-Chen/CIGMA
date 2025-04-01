@@ -1,7 +1,7 @@
 import shutil
 import sys, os, re, tempfile
 import numpy as np, pandas as pd
-from gxctmm import util
+from cigma import util
 
 def main():
     #

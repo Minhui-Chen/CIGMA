@@ -7,8 +7,6 @@ import seaborn as sns
 
 from scipy.stats import norm
 
-from gxctmm import plot
-
 
 def read_ldsc(data, trait, ct, ldsc_results_f):
     # get h2 and M
