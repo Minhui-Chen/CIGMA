@@ -11,12 +11,6 @@ def main():
     inds = np.unique(ctp.index.get_level_values(0))
     genes = ctp.columns.to_numpy()
 
-    # var = pd.read_table(snakemake.input.var, index_col=0)
-    # if 'feature_is_filtered' in var.columns:
-    #     genes = var.loc[~var['feature_is_filtered']].index.to_numpy()
-    # else:
-    #     genes = var.index.to_numpy()
-
     obs = pd.read_table(snakemake.input.obs, index_col=0)
     ind_pool = np.unique(obs[snakemake.params.ind_col].astype('str')+'+'+obs[snakemake.params.pool_col].astype('str'))
 
@@ -24,16 +18,18 @@ def main():
     # ann = sc.read_h5ad(snakemake.input.h5ad)
     print(ann.shape)
 
+    # filter cells
     cells = ((ann.obs[snakemake.params.ind_col].isin(inds))
             & (ann.obs[snakemake.params.ct_col].isin(cts))
             & (ann.obs[snakemake.params.ind_col].astype('str')+'+'+ann.obs[snakemake.params.pool_col].astype('str')).isin(ind_pool))
     data = ann[cells, genes]
-    # normalize and natural logarithm of one plus the input array
+    
+    # extract matrix
     if sparse.issparse(ann.X):
         X = data.X
     else:
         # when X is dense, data.X give error: Only one indexing vector or array is currently allowed for fancy indexing
-        X = ann[:, genes].X[cells]  # TODO: transform fun may not work for dense matrix
+        X = ann[:, genes].X[cells]
 
     # save matrix
     print(X.shape)

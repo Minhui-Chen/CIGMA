@@ -26,16 +26,10 @@ def inv_variance_meta(Ps, outs):
 
     w_hom_g2 = np.zeros(len(genes))
     w_hom_e2 = np.zeros(len(genes))
-    # w_shared_h2 = np.zeros(len(genes))
-    # w_specific_h2 = np.zeros(len(genes))
-    # w_specificity = np.zeros(len(genes))
     w_V = np.zeros((len(genes), C, C))
     w_W = np.zeros((len(genes), C, C))
     new_out['free']['hom_g2'] = np.zeros(len(genes))
     new_out['free']['hom_e2'] = np.zeros(len(genes))
-    # new_out['free']['shared_h2'] = np.zeros(len(genes))
-    # new_out['free']['specific_h2'] = np.zeros(len(genes))
-    # new_out['free']['specificity'] = np.zeros(len(genes))
     new_out['free']['V'] = np.zeros((len(genes), C, C))
     new_out['free']['W'] = np.zeros((len(genes), C, C))
     for i, out_f in enumerate(outs):
@@ -55,17 +49,6 @@ def inv_variance_meta(Ps, outs):
         w_hom_e2 += w_hom_e2_i
         new_out['free']['hom_e2'] += w_hom_e2_i * hom_e2
 
-        # shared h2
-        # shared_h2 = out['free']['shared_h2'][idx]
-        # w_shared_h2_i = 1 / out['p']['free']['var_shared_h2'][idx]
-        # w_shared_h2 += w_shared_h2_i
-        # new_out['free']['shared_h2'] += w_shared_h2_i * shared_h2
-
-        # specific h2
-        # specific_h2 = out['free']['specific_h2'][idx]
-        # w_specific_h2_i = 1 / out['p']['free']['var_specific_h2'][idx]
-        # w_specific_h2 += w_specific_h2_i
-        # new_out['free']['specific_h2'] += w_specific_h2_i * specific_h2
 
         # V W
         V = np.diagonal(out['free']['V'], axis1=1, axis2=2)[idx]
@@ -77,12 +60,6 @@ def inv_variance_meta(Ps, outs):
         w_W += w_W_i
         new_out['free']['W'] += np.array([np.diag(w_W_i[k] @ W[k]) for k in range(w_W_i.shape[0])])
 
-        # specificity
-        # V_bar = np.mean(V, axis=1)
-        # specificity = V_bar / (hom_g2 + V_bar)
-        # w_specificity_i = 1 / out['p']['free']['var_specificity'][idx]
-        # w_specificity += w_specificity_i
-        # new_out['free']['specificity'] += w_specificity_i * specificity
 
     # hom g2
     new_out['free']['hom_g2'] /= w_hom_g2
@@ -91,18 +68,6 @@ def inv_variance_meta(Ps, outs):
     # hom e2
     new_out['free']['hom_e2'] /= w_hom_g2
     new_out['p']['free']['var_hom_e2'] = 1 / w_hom_g2
-
-    # shared h2
-    # new_out['free']['shared_h2'] /= w_shared_h2
-    # new_out['p']['free']['var_shared_h2'] = 1 / w_shared_h2
-
-    # specific h2
-    # new_out['free']['specific_h2'] /= w_specific_h2
-    # new_out['p']['free']['var_specific_h2'] = 1 / w_specific_h2
-
-    # specificity
-    # new_out['free']['specificity'] /= w_specificity
-    # new_out['p']['free']['var_specificity'] = 1 / w_specificity
 
     # V W
     new_out['p']['free']['var_V'] = np.array([np.linalg.inv(X) for X in w_V])
@@ -221,23 +186,6 @@ def main():
     new_out['free']['shared_h2'] = tmp_out['free']['shared_h2']
     new_out['free']['specific_h2'] = tmp_out['free']['specific_h2']
     new_out['free']['specificity'] = tmp_out['free']['specificity']
-
-
-    # meta p values (Fisher's method)
-    # for i, out_f in enumerate(snakemake.input.out):
-    #     out = np.load(out_f, allow_pickle=True).item()
-    #     out_genes = out['gene']
-    #     idx = np.isin(out_genes, genes)
-    #     # check gene order
-    #     assert np.array_equal(genes, out_genes[idx])
-    #     new_out['p']['free']['hom_g2'] += np.log(out['p']['free']['hom_g2'][idx])
-    #     new_out['p']['free']['hom_e2'] += np.log(out['p']['free']['hom_e2'][idx])
-    #     new_out['p']['free']['V'] += np.log(out['p']['free']['V'][idx])
-    #     new_out['p']['free']['W'] += np.log(out['p']['free']['W'][idx])
-    # new_out['p']['free']['hom_g2'] = 1 - chi2.cdf(-2 * new_out['p']['free']['hom_g2'], 2 * len(snakemake.input.out))
-    # new_out['p']['free']['hom_e2'] = 1 - chi2.cdf(-2 * new_out['p']['free']['hom_e2'], 2 * len(snakemake.input.out))
-    # new_out['p']['free']['V'] = 1 - chi2.cdf(-2 * new_out['p']['free']['V'], 2 * len(snakemake.input.out))
-    # new_out['p']['free']['W'] = 1 - chi2.cdf(-2 * new_out['p']['free']['W'], 2 * len(snakemake.input.out))
 
 
     # save
