@@ -753,7 +753,7 @@ def ctp_h2_plot(out: dict, ax: plt.Axes, colors: list, labels: list = ['cis', 't
         y = np.median(specific_y) / (np.median(specific_y) + np.median(shared_y))
         return y - x
 
-    def permutation_test(shared_x, specific_x, shared_y, specific_y, n_perm=9999):
+    def permutation_test(shared_x, specific_x, shared_y, specific_y, n_perm=999):
         diff_obs = diff(shared_x, specific_x, shared_y, specific_y)
         diff_perm = np.zeros(n_perm)
         x = np.stack([shared_x, specific_x], axis=-1)

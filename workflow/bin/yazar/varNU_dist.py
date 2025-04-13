@@ -28,7 +28,7 @@ data = data.to_numpy().flatten()
 # print(np.nanmin(data))
 
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(6, 4))
 
 # ax = axes[0]
 # ax.hist(nu.to_numpy().flatten(), bins=100)
@@ -37,8 +37,8 @@ fig, ax = plt.subplots()
 
 
 # ax = axes[1]
-ax.hist(data, bins=30)
-ax.set_xlabel('Coefficient of variation(nu)')
+ax.hist(data, bins=30, density=True)
+ax.set_xlabel('Coefficient of variation($\delta$)')
 ax.set_ylabel('Frequency')
 
 print(np.nanpercentile(data, (10, 50, 90)))
@@ -47,7 +47,7 @@ ax.axvline(np.nanpercentile(data, 50), ls='--', color='0.8')
 ax.axvline(np.nanpercentile(data, 90), ls='--', color='0.8')
 
 # add coefficient of beta distribution
-rng = np.random.default_rng()
+rng = np.random.default_rng(123)
 mycolors = sns.color_palette()
 ax.axvline(x=np.std(rng.choice([-1, 1], 10000) * rng.beta(.1, 1, 10000)),
                 color=mycolors[1], ls='--', zorder=10, label='Beta(0.1, 1)')
@@ -59,7 +59,7 @@ ax.axvline(x=np.std(rng.choice([-1, 1], 10000) * rng.beta(.5, 1, 10000)),
                 # color=mycolors[4], ls='--', zorder=10, label='Beta(2,3)')
 ax.axvline(x=np.std(rng.choice([-1, 1], 1000) * rng.beta(20, 1, 1000)),
                 color=mycolors[3], ls='--', zorder=9, label='Beta(20, 1)')
-ax.legend()
+ax.legend(loc='upper right', bbox_to_anchor=(.85, 1))
 
 
 fig.savefig(snakemake.output.png)

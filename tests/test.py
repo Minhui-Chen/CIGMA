@@ -13,7 +13,7 @@ def main():
     P = data['P']  # cell type proportion matrix: Individuals X Cell types
 
     # run CIGMA
-    out, _ = fit.free_HE(Y=Y, K=K, ctnu=ctnu, P=P)
+    out, _ = fit.free_HE(Y=Y, K=K, ctnu=ctnu, P=P)  # complete in a few seconds
     print(out)
 
     # run CIGMA with Jackknife

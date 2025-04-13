@@ -45,7 +45,7 @@ This repository contains scripts for data analyses in our paper. `Snakemake file
 
 Installation
 ============
-The conda env is defined in the `environment.yml <env/environment.yml>`_ file.
+The conda env is defined in the `environment.yml <env/environment.yml>`_ file, which includes python v3.11.5 and all required dependencies.
 
 To create the conda environment, run:
 
@@ -55,7 +55,7 @@ conda activate cigma
 ```
 
 
-To only install the CIGMA Python package, run:
+To install only the CIGMA Python package, run (Installation should complete within a second):
 
 ```bash
 pip install cigma
