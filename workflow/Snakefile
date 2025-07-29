@@ -24,6 +24,7 @@ chrs = range(1, 23)
 # wildcard constraints
 wildcard_constraints: fixed = '\w+'
 wildcard_constraints: random = '\w+'
+wildcard_constraints: chr='[0-9]+'
 wildcard_constraints: i='[0-9]+'
 wildcard_constraints: k='[0-9]+'
 wildcard_constraints: rep='[0-9]+'
@@ -53,6 +54,7 @@ wildcard_constraints: ct_fixed='\w+'
 wildcard_constraints: ctnu='\w+'
 wildcard_constraints: cell_no='[\d\w]+'
 wildcard_constraints: cell_prop='[\d\w\.]+'
+wildcard_constraints: maf='[\d\w\.]+'
 
 
 
@@ -63,4 +65,6 @@ include: 'rules/sim.smk'
 include: 'rules/yazar.smk'
 include: 'rules/yazar_sim.smk'
 include: 'rules/perez.smk'
+include: 'rules/yazar.add.smk'
+include: 'dev/yazar.smk'
 # include: 'dev/dev.smk'

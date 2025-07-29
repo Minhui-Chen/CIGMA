@@ -1382,6 +1382,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
         p = {   
                 'hom_g2': wald.wald_test(out['hom_g2'], 0, var_hom_g2, N - n_par),
                 'V': wald.mvwald_test(np.diag(out['V']), np.zeros(C), var_V, n=N, P=n_par),
+                'vc': np.array([wald.wald_test(out['V'][i, i], 0, var_V[i, i], N - n_par) for i in range(C)]), # p for each cell type
                 'hom_e2': wald.wald_test(out['hom_e2'], 0, var_hom_e2, N - n_par),
                 'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), var_W, n=N, P=n_par),
                 'var_hom_g2': var_hom_g2,
@@ -1399,7 +1400,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
                 'jk_specific_h2': np.array(jacks['specific_h2']),  # NOTE: tmp
                 # 'jk_specificity': np.array(jacks['specificity']), # NOTE: tmp
                 }
-
+        
 
         # if Kt is None:
             # h2
@@ -1414,6 +1415,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
             p['var_V_b'] = (N - 1) * np.cov(np.array(jacks['V_b']).T, bias=True)
             p['V_b'] = wald.mvwald_test(np.diag(out['V_b']), np.zeros(C), 
                                         p['var_V_b'], n=N, P=n_par)
+            p['vc_b'] = np.array([wald.wald_test(out['V_b'][i, i], 0, p['var_V_b'][i, i], N - n_par) for i in range(C)]), # p for each cell type
             p['var_shared_h2_b'] = (N - 1) * np.var(jacks['shared_h2_b'])
             p['var_specific_h2_b'] = (N - 1) * np.var(jacks['specific_h2_b'])
             p['var_shared_h2_total'] = (N - 1) * np.var(jacks['shared_h2_total'])

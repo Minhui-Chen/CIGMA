@@ -1582,7 +1582,7 @@ use rule yazar_HE_togz as yazar_trans_HE_togz with:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.npy',
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
     output:
-        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.gz',
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.gz',
 
 
 use rule yazar_trans_HE_free as yazar_trans_HE_free_jk with:
