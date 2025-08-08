@@ -212,7 +212,8 @@ rule perez_filter_plink:
         bed = 'analysis/perez/data/geno/{anc}.{status}/chr{chr}.bed',
     shell:
         """
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        # load plink
+        {config['plink_load']}
 
         prefix="$(dirname {input.bed})/$(basename {input.bed} .bed)"
         o_prefix="$(dirname {output.bed})/$(basename {output.bed} .bed)"

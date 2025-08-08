@@ -1,6 +1,9 @@
 
 colorpalette: bright
 
+# programs
+plink_load: module load plink1.90
+
 sim:
   # color for expected values
   pointcolor: red

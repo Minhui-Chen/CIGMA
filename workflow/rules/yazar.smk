@@ -422,19 +422,15 @@ rule yazar_exclude_duplicatedSNPs:
         dup = 'analysis/yazar/data/geno/chr{chr}.dup',
     shell:
         '''
-        # load plink 1.9
-        if [[ $(hostname) == *midway* ]]; then
-            module load plink
-        else
-            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-        fi
+    # load plink 1.9
+    {config[plink_load]}
 
-        prefix="$(dirname {output.bed})/$(basename {output.bed} .bed)"
-        zcat {input.vcf}|grep -v '#'|cut -f 3|sort|uniq -d > {output.dup}
+    prefix="$(dirname {output.bed})/$(basename {output.bed} .bed)"
+    zcat {input.vcf}|grep -v '#'|cut -f 3|sort|uniq -d > {output.dup}
         plink --vcf {input.vcf} --double-id --keep-allele-order \
-                --snps-only \
-                --exclude {output.dup} \
-                --make-bed --out $prefix
+        --snps-only \
+        --exclude {output.dup} \
+        --make-bed --out $prefix
         '''
 
 
@@ -454,11 +450,7 @@ rule yazar_geno_pca:
     shell:
         '''
         # load plink 1.9
-        if [[ $(hostname) == *midway* ]]; then
-            module load plink
-        else
-            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-        fi
+        {config[plink_load]}
 
         if [ -d {params.tmp_dir} ]; then 
             rm -r {params.tmp_dir} 
@@ -521,15 +513,11 @@ rule yazar_he_kinship:
         mem_mb = lambda wildcards: '20G' if wildcards.chr != '1' else '80G',
     shell: 
         '''
-        # load plink 1.9
-        if [[ $(hostname) == *midway* ]]; then
-            module load plink
-        else
-            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-        fi
+    # load plink 1.9
+    {config[plink_load]}
 
-        python3 workflow/bin/yazar/kinship.npy.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
-                        {output.kinship} 
+    python3 workflow/bin/yazar/kinship.npy.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
+            {output.kinship} 
         '''
 
 
@@ -1013,7 +1001,7 @@ rule yazar_ldsc_rmMHC:
     shell:
         '''
         # load plink 1.9
-        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
+        {config[plink_load]}
 
         input_prefix="$(dirname {input.bim})/$(basename {input.bim} .bim)"
         output_prefix="$(dirname {output.bim})/$(basename {output.bim} .bim)"
@@ -1021,7 +1009,7 @@ rule yazar_ldsc_rmMHC:
         if [ {wildcards.chr} -eq {params.chr} ]; then
             awk -v start={params.start} -v end={params.end} '($4 < start || $4 > end) {{print $2}}' {input.bim} > {output.bed}.tmp.snps
 
-            plink --bfile $input_prefix  --extract {output.bed}.tmp.snps \
+            ${{config[plink_load]}} --bfile $input_prefix  --extract {output.bed}.tmp.snps \
                     --make-bed --out $output_prefix
             rm {output.bed}.tmp.snps
         else
@@ -1501,11 +1489,7 @@ rule yazar_trans_genome_kinship:
     shell:
         '''
         # load plink 1.9
-        if [[ $(hostname) == *midway* ]]; then
-            module load plink
-        else
-            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-        fi
+        {config[plink_load]}
 
         if [ -d {params.tmp_dir} ]; then 
             rm -r {params.tmp_dir} 
