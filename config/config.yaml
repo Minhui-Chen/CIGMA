@@ -2,7 +2,7 @@
 colorpalette: bright
 
 # programs
-plink_load: module load plink1.90
+plink_load: module load plink/1.90
 
 sim:
   # color for expected values
