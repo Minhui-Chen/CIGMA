@@ -15,12 +15,8 @@ rule yazar_rare_he_kinship:
     shell: 
         '''
         # load plink 1.9
-        if [[ $(hostname) == *midway* ]]; then
-            module load plink
-        else
-            module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9
-        fi
-
+        {config[plink_load]}
+        
         python3 workflow/bin/yazar/kinship.npy.maf.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
                         {wildcards.maf} {output.kinship} 
         '''
