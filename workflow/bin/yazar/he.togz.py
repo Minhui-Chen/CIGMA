@@ -52,6 +52,7 @@ def main():
         data[[f'free_W_{ct}' for ct in cts]] = W
         # data[[f'free_h2_{ct}' for ct in cts]] = out['free']['cis_h2']
         data[[f'free_beta_{ct}' for ct in cts]] = out['free']['ct_beta']
+        data['free_p_beta'] = out['p']['free']['ct_beta']
 
         # trans
         if 'hom_g2_b' in out['free'].keys():
