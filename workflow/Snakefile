@@ -66,5 +66,6 @@ include: 'rules/yazar.smk'
 include: 'rules/yazar_sim.smk'
 include: 'rules/perez.smk'
 include: 'rules/yazar.add.smk'
-include: 'dev/yazar.smk'
+if os.path.isfile('dev/yazar.smk'):
+    include: 'dev/yazar.smk'
 # include: 'dev/dev.smk'
