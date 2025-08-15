@@ -52,9 +52,9 @@ wildcard_constraints: gwas='\w+'
 wildcard_constraints: ct_random='\w+'
 wildcard_constraints: ct_fixed='\w+'
 wildcard_constraints: ctnu='\w+'
-wildcard_constraints: cell_no='[\d\w]+'
-wildcard_constraints: cell_prop='[\d\w\.]+'
-wildcard_constraints: maf='[\d\w\.]+'
+wildcard_constraints: cell_no='[\w]+'
+wildcard_constraints: cell_prop='[\w\.]+'
+wildcard_constraints: maf='[\w\.-]+'
 
 
 
