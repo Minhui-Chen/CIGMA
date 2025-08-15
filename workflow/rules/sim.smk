@@ -81,13 +81,6 @@ rule sim_HE:
     script: '../bin/sim/he.py'
 
 
-use rule sim_HE as sim_HE_full with:
-    output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.full.batch{{i}}.npy',
-    resources:
-        mem_mb = '32G',
-
-
 rule sim_mergeBatches_HE:
     input:
         out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{i}.npy' 
@@ -95,14 +88,6 @@ rule sim_mergeBatches_HE:
     output:
         out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.he.npy',
     script: '../bin/mergeBatches.py'
-
-
-use rule sim_mergeBatches_HE as sim_mergeBatches_HE_full with:
-    input:
-        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.full.batch{i}.npy' 
-                for i in range(config['sim']['batch_no'])],
-    output:
-        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.he.full.npy',
 
 
 def sim_agg_he_truebeta_subspace(wildcards):
@@ -140,11 +125,6 @@ def sim_agg_he_out_subspace(wildcards):
     return expand('analysis/sim/{{model}}/{params}/out.he.npy', params=subspace.instance_patterns)
 
 
-def sim_agg_he_full_out_subspace(wildcards):
-    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
-    return expand('analysis/sim/{{model}}/{params}/out.he.full.npy', params=subspace.instance_patterns)
-
-
 rule sim_agg_he_out:
     input:
         out = sim_agg_he_out_subspace,
@@ -161,12 +141,6 @@ rule sim_agg_he_out:
         np.save(output.out, data)
 
 
-use rule sim_agg_he_out as sim_agg_he_full_out with:
-    input:
-        out = sim_agg_he_full_out_subspace,
-    output:
-        out = 'analysis/sim/{model}/AGG{arg}.he.full.npy',
-
 
 
 ############################
@@ -175,6 +149,8 @@ use rule sim_agg_he_out as sim_agg_he_full_out with:
 use rule sim_HE as sim_HE_noJK with:
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.noJK.batch{{i}}.npy',
+    resources:
+        mem_mb = lambda wildcards: '6G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else '30G',  # may need to update memory
     params:
         free_jk = False,
 
@@ -199,35 +175,7 @@ use rule sim_agg_he_out as sim_agg_he_noJK_out with:
         out = 'analysis/sim/{model}/AGG{arg}.he.noJK.npy',
 
 
-############################
-# 1.2 HE without Full
-############################
-use rule sim_HE as sim_HE_noFull with:
-    output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.noFull.batch{{i}}.npy',
-    params:
-        free_jk = True,
-        full = False,
 
-
-use rule sim_mergeBatches_HE as sim_mergeBatches_HE_noFull with:
-    input:
-        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.noFull.batch{i}.npy' 
-                for i in range(config['sim']['batch_no'])],
-    output:
-        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.he.noFull.npy',
-
-
-def sim_agg_he_noFull_out_subspace(wildcards):
-    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
-    return expand('analysis/sim/{{model}}/{params}/out.he.noFull.npy', params=subspace.instance_patterns)
-
-
-use rule sim_agg_he_out as sim_agg_he_noFull_out with:
-    input:
-        out = sim_agg_he_noFull_out_subspace,
-    output:
-        out = 'analysis/sim/{model}/AGG{arg}.he.noFull.npy',
 ############################
 
 
@@ -297,7 +245,7 @@ rule sim_HE_all:
 rule sim_celltype_number_all:
     input:
         out1 = 'analysis/sim/free21/AGGss.he.npy',
-        out2 = 'analysis/sim/free22/AGGss.he.noFull.npy',
+        out2 = 'analysis/sim/free22/AGGss.he.npy',
     output:
         flag = touch('analysis/sim/celltype_number.flag'),
 
