@@ -75,7 +75,7 @@ rule sim_HE:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{{i}}.npy',
     resources:
         # mem_mb = lambda wildcards: '10G' if wildcards.model != 'full' else '150G',
-        mem_mb = lambda wildcards: '10G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 and wildcards.model != 'full' else '60G',
+        mem_mb = lambda wildcards: '8G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 and wildcards.model != 'full' else '60G',
     params:
         free_jk = True,
         full = lambda wildcards: True if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 and wildcards.model != 'full' else False
