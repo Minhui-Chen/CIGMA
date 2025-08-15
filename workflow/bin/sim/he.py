@@ -28,36 +28,27 @@ def main():
         else:
             random = {}
 
-        if snakemake.wildcards.model != 'full':
-            ## IID
-            iid_he, iid_he_wald = fit.iid_HE(Y, K, ctnu, P, fixed_covars=fixed, 
-                                random_covars=random, jk=iid_jk)
+        ## IID
+        iid_he, iid_he_wald = fit.iid_HE(Y, K, ctnu, P, fixed_covars=fixed, 
+                            random_covars=random, jk=iid_jk)
 
-            ## Free
-            free_he, free_he_wald = fit.free_HE(Y, K, ctnu, P, fixed_covars=fixed, 
-                                                random_covars=random, jk=free_jk)
+        ## Free
+        free_he, free_he_wald = fit.free_HE(Y, K, ctnu, P, fixed_covars=fixed, 
+                                            random_covars=random, jk=free_jk)
 
-            out = {'gene': key, 'iid':iid_he, 'free':free_he, 
-                    's':data[key]['s'], 
-                    'pi': data[key]['pi'], 'nu': data[key]['nu'].mean(), 
-                    'var_y': data[key]['y'].var(), 
-                    'wald': {'iid': iid_he_wald, 'free':free_he_wald}}
-            # Full
-            if full:
-                full_he = fit.full_HE(Y, K, ctnu, P, fixed_covars=fixed, random_covars=random)
-                out['full'] = full_he
-
-            # save
-            outs.append(out)
-            
-        else:
-            # Full
+        out = {'gene': key, 'iid':iid_he, 'free':free_he, 
+                's':data[key]['s'], 
+                'pi': data[key]['pi'], 'nu': data[key]['nu'].mean(), 
+                'var_y': data[key]['y'].var(), 
+                'wald': {'iid': iid_he_wald, 'free':free_he_wald}}
+        # Full
+        if full:
             full_he = fit.full_HE(Y, K, ctnu, P, fixed_covars=fixed, random_covars=random)
+            out['full'] = full_he
 
-            # save
-            outs.append({'gene': key, 'full':full_he, 'nu': data[key]['nu'].mean(), 
-                         's':data[key]['s'], 'pi': data[key]['pi']})
-        
+        # save
+        outs.append(out)
+            
     np.save(snakemake.output.out, outs)
 
 

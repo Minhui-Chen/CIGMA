@@ -74,12 +74,18 @@ rule sim_HE:
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.batch{{i}}.npy',
     resources:
-        # mem_mb = lambda wildcards: '10G' if wildcards.model != 'full' else '150G',
-        mem_mb = lambda wildcards: '8G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 and wildcards.model != 'full' else '60G',
+        mem_mb = lambda wildcards: '6G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else '30G',
     params:
         free_jk = True,
-        full = lambda wildcards: True if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 and wildcards.model != 'full' else False
+        full = False
     script: '../bin/sim/he.py'
+
+
+use rule sim_HE as sim_HE_full with:
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.full.batch{{i}}.npy',
+    resources:
+        mem_mb = '32G',
 
 
 rule sim_mergeBatches_HE:
@@ -89,6 +95,14 @@ rule sim_mergeBatches_HE:
     output:
         out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.he.npy',
     script: '../bin/mergeBatches.py'
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_HE_full with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/he.full.batch{i}.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/out.he.full.npy',
 
 
 def sim_agg_he_truebeta_subspace(wildcards):
@@ -126,6 +140,11 @@ def sim_agg_he_out_subspace(wildcards):
     return expand('analysis/sim/{{model}}/{params}/out.he.npy', params=subspace.instance_patterns)
 
 
+def sim_agg_he_full_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/out.he.full.npy', params=subspace.instance_patterns)
+
+
 rule sim_agg_he_out:
     input:
         out = sim_agg_he_out_subspace,
@@ -141,6 +160,12 @@ rule sim_agg_he_out:
             data[arg] = np.load(out, allow_pickle=True).item()
         np.save(output.out, data)
 
+
+use rule sim_agg_he_out as sim_agg_he_full_out with:
+    input:
+        out = sim_agg_he_full_out_subspace,
+    output:
+        out = 'analysis/sim/{model}/AGG{arg}.he.full.npy',
 
 
 
