@@ -179,7 +179,7 @@ reltol=NULL, sd=NULL, chol=TRUE
 
     # set initial parameters
     if (is.null(par)) {
-        hom2 <- median(apply(Y, 2, var)) / n_var
+        hom2 <- mean(apply(Y, 2, var)) / n_var
         par <- rep(hom2, n_par)
     }
     if (!is.null(seed)) {

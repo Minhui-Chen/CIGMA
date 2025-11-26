@@ -1,9 +1,6 @@
 ##########################################################################
 # Yazar simulation: permute cells
 ##########################################################################
-# yazar_sim_he_batches = config['yazar_sim']['he_nbatch']
-# yazar_sim_replicates = config['yazar_sim']['replicates']
-
 rule yazar_sim_permute_ct:
     input:
         h5ad = 'analysis/yazar/data/logp_cp10k.h5ad',
@@ -17,8 +14,9 @@ rule yazar_sim_permute_ct:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
         pool_col = yazar_pool_col,
-        seed = 123,
+        seed = 1234567,
     resources:
+        partition = 'tier3q',
         mem_mb = '90G',
     script: '../bin/yazar/sim.transform.py'
 
@@ -118,6 +116,112 @@ rule yazar_sim_permute_ct_all:
 
 
 
+
+#################################
+# permute cell type subset
+#################################
+use rule yazar_sim_permute_ct as yazar_sim_permute_ct_subset with:
+    input:
+        h5ad = 'analysis/yazar/data/logp_cp10k.h5ad',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.final.gz',
+    output:
+        X = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/X.npz',
+        obs = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/obs.gz',
+        var = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/var.gz',
+
+
+use rule yazar_ctp as yazar_sim_permute_ct_subset_ctp with:
+    input:
+        X = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/X.npz',
+        obs = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/obs.gz',
+        var = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/var.gz',
+    output:
+        ctp = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctp.gz',
+        ctnu = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctnu.gz',
+        P = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/P.final.gz',
+        n = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/n.final.gz',
+
+
+use rule yazar_std_op as yazar_sim_permute_ct_subset_std_op with:
+    input:
+        ctp = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctp.gz',
+        ctnu = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctnu.gz',
+        P = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/P.final.gz',
+    output:
+        op = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/op.final.gz',
+        nu = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/nu.final.gz',
+        ctp = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctp.final.gz',
+        ctnu = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctnu.final.gz',
+
+
+use rule yazar_op_pca as yazar_sim_permute_ct_subset_op_pca with:
+    input:
+        op = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/op.final.gz',
+    output:
+        evec = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/evec.gz',
+        eval = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/eval.gz',
+        pca = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/pca.gz',
+        png = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/op.pca.png',
+
+
+use rule yazar_HE_split as yazar_sim_permute_ct_subset_HE_split with:
+    input:
+        ctp = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctp.final.gz',
+        ctnu = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/ctnu.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+    output:
+        ctp = [f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        ctnu = [f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctnu.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        batch = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctp.batch.txt',
+    
+
+use rule yazar_he_kinship_split as yazar_sim_permute_ct_subset_kinship_split with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        batch = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/kinship.batch{i}.npy')
+                    for i in range(yazar_he_batches)],
+    
+
+use rule yazar_HE_free_jk as yazar_sim_permute_ct_subset_HE with:
+    input:
+        ctp = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/kinship.batch{{i}}.npy',
+        P = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/P.final.gz',
+        op_pca = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/batch{{i}}.npy',
+    params:
+        jk = False,
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        free = True,
+        full = False,
+
+
+use rule yazar_HE_free_merge as yazar_sim_permute_ct_subset_HE_merge with:
+    input:
+        out = [f'staging/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he/batch{i}.npy'
+            for i in range(yazar_he_batches)],
+    output:
+        out = f'analysis/sim/yazar/{yazar_paramspace.wildcard_pattern}/permute_ct/{{permuted_cts}}/he.npy',
+
+
+rule yazar_sim_permute_ct_subset_all:
+    input:
+        sim = expand('analysis/sim/yazar/{params}/permute_ct/{permuted_cts}/he.npy',
+                      params=yazar_paramspace.instance_patterns,
+                      permuted_cts=['CD4NC_BIN', 'CD4ET_CD4NC', 'CD4ET_CD4NC_CD8ET_CD8NC', 'CD4ET_CD4NC_BIN_BMem']),
 
 
 

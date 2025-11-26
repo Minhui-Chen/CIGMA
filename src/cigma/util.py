@@ -18,6 +18,132 @@ from numpy.random import default_rng
 from . import log, fit, wald
 
 
+def read_out(cigma_out: dict, columns: list, cts: Optional[list] = None) -> pd.DataFrame:
+    """
+    Read CIGMA output and save in df.
+
+    Parameters:
+        cigma_out:  output from CIGMA
+        columns:    columns to include in the output dataframe
+        cts:        cell types
+    """
+    if cts is None:
+        cts = list(range(1000))
+
+    # make a dict to store results
+    out = {}
+    for column in columns:
+        if ':' not in column:
+            out[column] = cigma_out[column]
+        else:
+            # Support nested keys using colon-separated notation
+            tmp = cigma_out
+            for key in column.split(':')[:-1]:
+                # print(key)
+                if key not in tmp:
+                    raise KeyError(f"Key '{key}' not found in cigma_out for column '{column}'")
+                tmp = tmp[key]
+
+            key = column.split(':')[-1]
+            if key in ['V', 'V_b', 'W'] and 'p' not in column.split(':'):
+                X = np.diagonal(tmp[key], axis1=1, axis2=2)
+                for i in range(X.shape[1]):
+                    out[f'{column}_{cts[i]}'] = X[:, i]
+                if np.any(tmp[key][:, 0, 1] != 0):
+                    for i in range(X.shape[1]-1):
+                        for j in range(i+1, X.shape[1]):
+                            out[f'{column}_{cts[i]}_{cts[j]}'] = tmp[key][:, i, j]
+            elif key == 'v':
+                out[column] = np.diagonal(tmp['V'], axis1=1, axis2=2).mean(axis=1)
+            elif key == 'v_b':
+                out[column] = np.diagonal(tmp['V_b'], axis1=1, axis2=2).mean(axis=1)
+            elif key == 'w':
+                out[column] = np.diagonal(tmp['W'], axis1=1, axis2=2).mean(axis=1)
+            elif key == 'ct_beta':
+                X = tmp[key]
+                for i in range(X.shape[1]):
+                    out[f'{column}_{cts[i]}'] = X[:, i]
+            elif key == 'vc':
+                # p value for V_c
+                X = tmp[key]
+                for i in range(X.shape[1]):
+                    out[f'{column}_{cts[i]}'] = X[:, i]
+            else:
+                if key not in tmp:
+                    raise KeyError(f"Key '{key}' not found in cigma_out for column '{column}'")
+                out[column] = tmp[key]
+    # print(out)
+    return pd.DataFrame(out)
+
+
+def matching_genes(target_genes: Union[npt.ArrayLike, pd.Series, List[str]], df: pd.DataFrame, rng: np.random.Generator, k: int = 1000, 
+                   window: int = 500000, bin_size: int = 500) -> npt.NDArray:
+    """
+    Find matching genes for a given set of target genes.
+
+    Parameters:
+        target_genes: List or ndarray of target gene names.
+        df: DataFrame containing gene information, including chr, start, end, mean_expr_rank, and gene_length_rank.
+        k: Number of random sets to generate.
+        window: Window size for nearby gene to exclude.
+        bin_size: Bin size for random sampling.
+
+    Returns:
+        Array of shape (k, ngene) containing matching gene sets.
+    """
+    # nearby genes
+    nearby_genes = []
+    for gene in target_genes:
+        chr = df.loc[df['gene'] == gene, 'chr'].values[0]
+        start = df.loc[df['gene'] == gene, 'start'].values[0]
+        end = df.loc[df['gene'] == gene, 'end'].values[0]
+        window_start = start - window
+        window_end = end + window
+        # overlap
+        filter = (df['chr'] == chr) & \
+                    (((df['start'] >= window_start) & (df['start'] <= window_end)) | \
+                    ((df['end'] >= window_start) & (df['end'] <= window_end)) | \
+                    ((df['start'] <= window_start) & (df['end'] >= window_end)))
+        nearby = df.loc[filter, 'gene'].values
+        nearby_genes.append(nearby)
+    nearby_genes = np.unique(np.concatenate(nearby_genes))
+
+    # random sampling: matching mean expression and gene length
+    randoms = []
+
+    for gene in target_genes:
+        rank = df.loc[df['gene'] == gene, 'mean_expr_rank'].values[0]
+        length = df.loc[df['gene'] == gene, 'gene_length_rank'].values[0]
+        filter = (df['mean_expr_rank'] >= rank - bin_size) & (df['mean_expr_rank'] <= rank + bin_size) & \
+                    (df['gene_length_rank'] >= length - bin_size) & (df['gene_length_rank'] <= length + bin_size) & \
+                    (~df['gene'].isin(nearby_genes))
+        candidates = df.loc[filter, 'gene'].values
+        assert len(candidates) > 0
+        selected = rng.choice(candidates, size=300 * k, replace=True)
+        randoms.append(selected)
+    randoms = np.array(randoms).T  # k x ngene
+    print(randoms.shape)
+
+    # remove gene sets with duplicates
+    filters = [len(set(randoms[i])) == len(randoms[i]) for i in range(randoms.shape[0])]
+    randoms = randoms[filters]
+    print(randoms.shape)
+    # check uniqueness
+    unique_sets = set()
+    filters = []
+    for i in range(randoms.shape[0]):
+        gene_tuple = tuple(sorted(randoms[i]))
+        if gene_tuple in unique_sets:
+            filters.append(False)
+        else:
+            unique_sets.add(gene_tuple)
+            filters.append(True)
+    randoms = randoms[filters]
+    print(randoms.shape)
+
+    assert randoms.shape[0] >= k, f'Not enough random sets: {randoms.shape[0]} < {k}'
+    return randoms[:k]
+
 
 def merge_dicts(reps, out):
     for key, value in reps[0].items():
@@ -955,7 +1081,7 @@ def subprocess_popen(cmd: list, log_fn: Optional[str] = None) -> None:
 def extract_vcf(input_f: str, panel_f: Optional[str] = None, samples: Optional[npt.ArrayLike] = None, 
                 samples_f: Optional[str] = None, pops: Optional[npt.ArrayLike] = None, 
                 snps_f: Optional[str] = None, snps: Optional[npt.ArrayLike] = None, 
-                maf_filter: bool = True, maf: Union[float, str] = '0.000000001',
+                maf_filter: bool = True, maf: Union[float, str] = '0.000000001', max_maf: Optional[str] = None,
                 geno: str = '1', output_bfile: Optional[str] = None, bim_only: bool = False,
                 ped: bool = False, output_vcf_prefix: Optional[str] = None, 
                 update_bim: bool = True, ldprune: bool = False, ld_window_size: str = '50', 
@@ -977,6 +1103,7 @@ def extract_vcf(input_f: str, panel_f: Optional[str] = None, samples: Optional[n
     snps:   a list of snps. Only support output bfile.
     maf_filter: whether filter variants on maf
     maf:    maf threshold
+    max_maf:   maximum maf threshold
     geno:   filters out all variants with missing call rates exceeding the provided value
     output_bfile:   prefix for output bfile bed/bim
     bim_only:   output bim file only --make-just-bim
@@ -1034,6 +1161,8 @@ def extract_vcf(input_f: str, panel_f: Optional[str] = None, samples: Optional[n
     # maf filter
     if maf_filter:
         operations += ['--maf', str(maf)]
+        if max_maf is not None:
+            operations += ['--max-maf', str(max_maf)]
 
     if additional_operations is not None:
         operations += additional_operations

@@ -85,10 +85,12 @@ def main():
             G.append(G_)
         ## convert SNP x IND to IND x SNP
         G = np.array(G).T
+        data[i]['rawG'] = G
         ## standardize
         # if np.any(np.std(G, axis=0) == 0):
         #    sys.exit(f'{sum(np.std(G, axis=0) == 0)}')
-        G = stats.zscore(G)
+        maf = np.mean(G, axis=0) / 2
+        G = (G - 2 * maf) / np.sqrt(2 * maf * (1 - maf))
         ## save
         data[i]['G'] = G
 

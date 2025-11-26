@@ -15,6 +15,7 @@ import seaborn as sns
 from scipy import stats
 from statsmodels.regression.linear_model import RegressionResults
 from sklearn import linear_model
+from functools import partial
 from . import log
 
 
@@ -679,27 +680,41 @@ def ctp_h2_plot(out: dict, ax: plt.Axes, colors: list, labels: list = ['cis', 't
 
 
    # transcriptome-wide h2
-    ratio_of_mean = lambda x, y: x.mean() / y.mean()
-    median = lambda x, y: np.median(x / y)
-    mean = lambda x, y: np.mean(x / y)
-    mean_clip = lambda x, y: np.mean(np.clip((x / y), -100, 100))
+    xratio_of_mean = lambda x, y: x.mean() / y.mean()
+    xmedian = lambda x, y: np.median(x / y)
+    xmean = lambda x, y: np.mean(x / y)
+    xmean_clip = lambda x, y: np.mean(np.clip((x / y), -100, 100))
     if h2 == 'ratio':
-        func = ratio_of_mean
+        func = xratio_of_mean
     elif h2 == 'median':
-        func = median
+        func = xmedian
     elif h2 =='mean':
-        func = mean
+        func = xmean
     elif h2 =='mean_clip':
-        func = mean_clip
+        func = xmean_clip
 
     cis_bio_hom_h2 = func(cis_hom_g2, bio_var)
     cis_bio_ct_h2 = func(cis_V, bio_var)
     trans_bio_hom_h2 = func(trans_hom_g2, bio_var)
     trans_bio_ct_h2 = func(trans_V, bio_var)
-    print(f"Cis shared: {cis_bio_hom_h2}; Cis specific median: {cis_bio_ct_h2};")
-    print(f"Cis specific (%): {cis_bio_ct_h2 / (cis_bio_ct_h2 + cis_bio_hom_h2)}")
-    print(f"Trans shared median: {trans_bio_hom_h2}; Trans specific median: {trans_bio_ct_h2};")
-    print(f"Tans specific (%): {trans_bio_ct_h2 / (trans_bio_ct_h2 + trans_bio_hom_h2)}")
+
+    specific_func = lambda x_hom_g2, x_V, x_bio_var, x_func: x_func(x_V, x_bio_var) / (x_func(x_hom_g2, x_bio_var) + x_func(x_V, x_bio_var))
+    print(f"Cis shared: {cis_bio_hom_h2}; Cis specific: {cis_bio_ct_h2};")
+    print(f"Cis specific (%): {specific_func(cis_hom_g2, cis_V, bio_var, func)}")
+    print(f"Trans shared: {trans_bio_hom_h2}; Trans specific: {trans_bio_ct_h2};")
+    print(f"Trans specific (%): {specific_func(trans_hom_g2, trans_V, bio_var, func)}")
+    # bootstrap for sd
+    wrapped = partial(specific_func, x_func=func)
+    cis_specific_sd = stats.bootstrap((cis_hom_g2, cis_V, bio_var), wrapped,
+                                vectorized=False, paired=True, random_state=rng
+                                ).standard_error
+    trans_specific_sd = stats.bootstrap((trans_hom_g2, trans_V, bio_var), wrapped,
+                                vectorized=False, paired=True, random_state=rng
+                                ).standard_error
+    print(f"Cis specific sd: {cis_specific_sd}")
+    print(f"Trans specific sd: {trans_specific_sd}")
+
+
     cis_bio_total_h2 = cis_bio_hom_h2 + cis_bio_ct_h2
     trans_bio_total_h2 = trans_bio_hom_h2 + trans_bio_ct_h2
     print(f"Trans (%): {trans_bio_total_h2 / (cis_bio_total_h2 + trans_bio_total_h2)}")

@@ -37,10 +37,11 @@ def main():
     kinship = np.load(snakemake.input.kinship, allow_pickle=True).item()
     
     # prepare trans kinship
+    genomes = {}
+    gene_location = pd.DataFrame()
     if 'genome' in snakemake.input.keys():
         gene_location = pd.read_table(snakemake.input.genes)
 
-        genomes = {}
         for chr, genome_f in zip(snakemake.params.chrs, snakemake.input.genome):
             genome = []
             for line in open(genome_f):
@@ -51,18 +52,23 @@ def main():
             genome = util.sort_grm(genome, genome_ids, inds.to_list()).astype('float32')
             genomes[chr] = genome
             
+    promoter_kinship = {}
     if 'promoter' in snakemake.input.keys():
         promoter_kinship = np.load(snakemake.input.promoter, allow_pickle=True).item()
         # sanity check gene order
-        assert np.all(kinship['gene'] == promoter_kinship['gene'])
+        try:
+            assert np.all(kinship['gene'] == promoter_kinship['gene'])
+        except:
+            print(kinship['gene'])
+            print(promoter_kinship['gene'])
+            sys.exit('Gene order not matching between kinship and promoter kinship!')
 
     # check ctp, ctnu, P have the same order
     gene = genes[0]
     ctp = ctps[gene].unstack()
     ctnu = ctnus[gene].unstack()
-    if not (ctp.index.equals(inds) and ctnu.index.equals(inds)
-            and ctp.columns.equals(cts) and ctnu.columns.equals(cts)):
-        sys.exit('Inds or CTs order not matching!\n')
+    assert (ctp.index.equals(inds) and ctnu.index.equals(inds)
+            and ctp.columns.equals(cts) and ctnu.columns.equals(cts))
 
     # collect covariates
     fixed_covars, random_covars = util.yazar_covars(inds.to_list(), snakemake.input.obs,
@@ -134,7 +140,10 @@ def main():
                     if np.all(K == promoter_K):
                         log.logger.info(f'Equal GRM')
                         continue
-                    free_he, free_he_wald = fit.free_HE(ctp, K, ctnu, P, fixed_covars, random_covars, Kt=promoter_K, jk=jk, prop=prop, dtype='float32')
+                    free_he, free_he_wald = fit.free_HE(ctp, K, ctnu, P, 
+                            fixed_covars, random_covars, Kt=promoter_K, 
+                            fixed_shared=fixed_shared, random_shared=batch_shared, 
+                            jk=jk, prop=prop, dtype='float32')
                     free_he['hom_g2_perSNP'] = free_he['hom_g2'] / kinship['nsnp'][gene_idx]
                     free_he['V_perSNP'] = free_he['V'] / kinship['nsnp'][gene_idx]
                     free_he['hom_g2_perSNP_b'] = free_he['hom_g2_b'] / promoter_kinship['nsnp'][gene_idx]

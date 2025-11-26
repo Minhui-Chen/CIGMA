@@ -140,6 +140,67 @@ def sample_cells(x: pd.Series, rng: np.random.Generator, n: Optional[int]=None,
     return x
 
 
+def sample_reads(X: sparse.csr_matrix, n_reads: Optional[int]=None, p_reads: Optional[float]=None,
+                 rng: np.random.Generator=np.random.default_rng()) -> sparse.csr_matrix:
+    """
+    Sampling reads per cell: Row-wise multinomial sampling from a CSR sparse matrix.
+
+    Parameters
+    ----------
+    X : csr_matrix
+        Sparse matrix, each row is a cell containing read counts across genes.
+    n_reads : int or None
+        If int, fixed number of reads per cell.
+    p_reads : float or None
+        If float, proportion of reads to sample per cell.
+    rng : np.random.Generator
+
+    Returns
+    -------
+    Y : csr_matrix
+        Multinomial resampled counts in CSR format.
+    """
+
+    data_out, indices_out, indptr_out = [], [], [0]
+
+    for i in range(X.shape[0]):
+        start, end = X.indptr[i], X.indptr[i+1]
+        counts = X.data[start:end]
+        cols  = X.indices[start:end]
+
+        if counts.sum() == 0:
+            # empty row
+            indptr_out.append(len(data_out))
+            continue
+
+        # normalize to probabilities
+        probs = counts / counts.sum()
+
+        # total reads to sample
+        n = 0
+        if n_reads is not None:
+            n = n_reads
+        elif p_reads is not None:
+            n = int(p_reads * counts.sum())
+
+        draw = rng.multinomial(n, probs)
+
+        # keep only nonzeros
+        mask = draw > 0
+        data_out.extend(draw[mask])
+        indices_out.extend(cols[mask])
+        indptr_out.append(len(data_out))
+
+    Y = sparse.csr_matrix(
+        (np.array(data_out, dtype=int),
+        np.array(indices_out, dtype=int),
+        np.array(indptr_out, dtype=int)),
+        shape=X.shape
+    )
+
+    return Y
+
+
 def pseudobulk(counts: Optional[pd.DataFrame] = None, 
                meta: Optional[pd.DataFrame] = None, 
                ann: Optional[AnnData] = None, 
@@ -339,19 +400,16 @@ def pseudobulk(counts: Optional[pd.DataFrame] = None,
         cell_counts = cell_counts.astype('int')
 
     # filter individuals
-    inds = cell_counts.index[cell_counts.sum(axis=1) >= ind_cut].tolist()
-    P = cell_counts.loc[cell_counts.index.isin(inds)]
-    # ctp = ctp.loc[ctp.index.get_level_values('ind').isin(inds)]
-    # ctnu = ctnu.loc[ctnu.index.get_level_values('ind').isin(inds)]
+    cell_counts = cell_counts[cell_counts.sum(axis=1) >= ind_cut]
+
+    # convert cell counts to proportions
+    P = cell_counts.divide(cell_counts.sum(axis=1), axis=0)
 
     # filter cts
-    P2 = P.stack()
-    P2 = P2.loc[P2 >= ct_cut]
-    ctp = ctp.loc[ctp.index.isin(P2.index)]
-    ctnu = ctnu.loc[ctnu.index.isin(P2.index)]
-
-    # conver P cell counts to proportions
-    P = P.divide(P.sum(axis=1), axis=0)
+    cell_counts2 = cell_counts.stack()
+    cell_counts2 = cell_counts2.loc[cell_counts2 >= ct_cut]
+    ctp = ctp.loc[ctp.index.isin(cell_counts2.index)]
+    ctnu = ctnu.loc[ctnu.index.isin(cell_counts2.index)]
 
     # print(ctp.shape, ctnu.shape, P.shape)
 

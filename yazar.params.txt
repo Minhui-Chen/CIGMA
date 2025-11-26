@@ -2,6 +2,8 @@
 # ct_min_cellnum: For cts <= ct_min_cellnum, set nu and y to missing. only keep cts with > prop non-missing values
 ind_min_cellnum	ct_min_cellnum	prop	geno_pca_n	op_pca_n	batch	fixed
 10	10	0.9	6	1	shared	shared
+#10	10	0.5	6	1	shared	shared
+#10	10	0.998	6	1	shared	shared
 #10	10	0.9	8	1	shared	shared
 #10	10	0.9	4	1	shared	shared
 #10	10	0.9	6	1	specific	shared

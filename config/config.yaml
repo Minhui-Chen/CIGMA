@@ -2,7 +2,9 @@
 colorpalette: bright
 
 # programs
-plink_load: module load plink/1.90
+plink_load: module load gcc/11.3.0 plink/1.9
+partition1: tier3q
+partition2: tier3q
 
 sim:
   # color for expected values
@@ -10,6 +12,8 @@ sim:
   replicates: 1000
   batch_no: 500
   noise_alpha: [0.1, 0.5, 20]
+  L: 20
+  nL: 80
 
 
 yazar:
@@ -35,6 +39,18 @@ yazar:
     Crohns: data/ldsc/gwas/alkes/PASS_Crohns_Disease.sumstats
     Celiac: data/ldsc/gwas/alkes/PASS_Celiac.sumstats
     Lupus: data/ldsc/gwas/alkes/PASS_Lupus.sumstats
+  neg_traits:
+    - Height
+    - CAD
+    - SCZ
+  pos_traits:
+    - UC
+    - RA
+    - PBC
+    - MS
+    - Crohns
+    - Celiac
+    - Lupus
 
 
 perez:
@@ -42,8 +58,9 @@ perez:
   reml_nbatch: 10000
   radius: 5e5   # cis region size
 
-
-ldsc:
+# GWAS has already removed 6:25-34Mb https://storage.googleapis.com/broad-alkesgroup-public/sumstats_formatted/readme.txt
+# https://www.ncbi.nlm.nih.gov/grc/human/regions/MHC?asm=GRCh37
+ldsc: 
   mhc:
     chr: 6
     start: 28477797

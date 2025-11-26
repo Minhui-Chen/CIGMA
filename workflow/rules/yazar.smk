@@ -106,6 +106,7 @@ rule yazar_ctp_transform:
         ct_col = yazar_ct_col,
         pool_col = yazar_pool_col,
     resources:
+        partition = 'tier3q',
         mem_mb = '120G',
     script: '../bin/yazar/transform.py'
 
@@ -124,6 +125,7 @@ rule yazar_ctp:
         ind_col = yazar_ind_col,
         ct_col = yazar_ct_col,
     resources:
+        partition = 'tier3q',
         mem_mb = '120G',
     run:
         from scipy import sparse
@@ -132,7 +134,7 @@ rule yazar_ctp:
         X = sparse.load_npz(input.X)
         obs = pd.read_table(input.obs, index_col=0)
         var = pd.read_table(input.var, index_col=0)
-        ctp, ctnu, P, n = preprocess.pseudobulk(X=X, obs=obs, var=var, ind_cut=100, ct_cut=10,
+        ctp, ctnu, P, n = preprocess.pseudobulk(X=X, obs=obs, var=var, 
                 ind_col=params.ind_col, ct_col=params.ct_col)
 
         # save
@@ -207,6 +209,7 @@ rule yazar_var_ctnu:
         ct_col = yazar_ct_col,
         seed = 42,
     resources:
+        partition = 'tier3q',
         mem_mb = '50G',
     run:
         from scipy import stats, sparse
@@ -317,6 +320,19 @@ rule yazar_rm_rareINDnCT:
     script: '../bin/yazar/rm_rareINDnCT.py'
 
 
+rule yazar_gene_expression_proportion:
+    input:
+        ctp = 'data/Yazar2022Science/ctp.gz',
+        ctnu = 'data/Yazar2022Science/ctnu.gz',
+        n = 'data/Yazar2022Science/n.gz',
+    output:
+        prop = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/gene.expression.proportion.gz',
+    resources:
+        partition = config['partition2'],
+        mem_mb = '20G',
+    script: '../bin/yazar/gene_expression_proportion.py'
+
+
 rule yazar_rm_missingIND:
     input:
         ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.gz',
@@ -328,8 +344,6 @@ rule yazar_rm_missingIND:
         ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.rmid.gz',
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
         n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/n.final.gz',
-    resources:
-        mem_mb = '10G',
     run:
         ctp = pd.read_table(input.ctp, index_col=(0, 1)).sort_index()
         ctnu = pd.read_table(input.ctnu, index_col=(0, 1)).sort_index()
@@ -346,6 +360,28 @@ rule yazar_rm_missingIND:
         n.loc[n.index.isin(ids)].to_csv(output.n, sep='\t')
 
 
+rule yazar_op:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+    output:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.rmid.gz',
+    run:
+        ctp = pd.read_table(input.ctp, index_col=(0, 1))
+        P = pd.read_table(input.P, index_col=0)
+        ops = []
+        for gene in ctp.columns:
+            gene_ctp = ctp[gene].unstack()
+            assert all(gene_ctp.index == P.index)
+            assert all(gene_ctp.columns == P.columns)
+            gene_op = (gene_ctp * P).sum(axis=1)
+            gene_op.name = gene
+            ops.append(gene_op)
+        op = pd.concat(ops, axis=1)
+        op.index.name = P.index.name
+        op.to_csv(output.op, sep='\t', index=True, header=True)
+
+
 rule yazar_std_op:
     input:
         ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.rmid.gz',
@@ -356,8 +392,6 @@ rule yazar_std_op:
         nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/nu.std.gz',
         ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.std.gz',
         ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.std.gz',
-    resources:
-        mem_mb = '10G',
     run:
         from cigma import preprocess
         ctp = pd.read_table(input.ctp, index_col=(0,1)).astype('float32')
@@ -384,8 +418,6 @@ rule yazar_exclude_sexchr:
         nu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/nu.final.gz',
         ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.final.gz',
         ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.final.gz',
-    resources:
-        mem_mb = '10G',
     run:
         genes = pd.read_table(input.genes)
         genes = np.unique(genes['feature'])
@@ -446,6 +478,7 @@ rule yazar_geno_pca:
         prefix = lambda wildcards, output: os.path.splitext(output.eigenvec)[0],
         tmp_dir = lambda wildcards, output: os.path.splitext(output.eigenvec)[0] + '_tmp',
     resources:
+        partition = 'tier3q',
         mem_mb = '40G',
     shell:
         '''
@@ -506,18 +539,18 @@ rule yazar_he_kinship:
         bed = 'analysis/yazar/data/geno/chr{chr}.bed',
     output:
         kinship = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{{chr}}.npy',
-        # kinship = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{{chr}}.npy'),
     params:
         r = int(float(config['yazar']['radius'])),
     resources:
+        partition = lambda wildcards: 'tier2q' if wildcards.chr != '1' else 'tier3q',
         mem_mb = lambda wildcards: '20G' if wildcards.chr != '1' else '80G',
     shell: 
         '''
-    # load plink 1.9
-    {config[plink_load]}
+        # load plink 1.9
+        {config[plink_load]}
 
-    python3 workflow/bin/yazar/kinship.npy.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
-            {output.kinship} 
+        python3 workflow/bin/yazar/kinship.npy.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
+                {output.kinship} 
         '''
 
 
@@ -532,8 +565,6 @@ rule yazar_HE_split:
         ctnu = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{i}.gz'
                 for i in range(yazar_he_batches)],
         batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch.txt',
-    resources:
-        mem_mb = '10G',
     run:
         meta = pd.read_table(input.genes, usecols=['feature', 'chr'])
         meta = meta.drop_duplicates()
@@ -591,6 +622,7 @@ rule yazar_he_kinship_split:
     params:
         chrs = chrs,
     resources:
+        partition = 'tier2q',
         mem_mb = '20G',
     script: '../bin/yazar/kinship.split.py'
 
@@ -611,6 +643,7 @@ rule yazar_HE_free:
         iid = True,
         full = True,
     resources:
+        partition = 'tier3q',
         mem_mb = '80G',
     script: '../bin/yazar/he.py' 
 
@@ -624,12 +657,18 @@ rule yazar_HE_free_merge:
     script: '../bin/mergeBatches.py'
 
 
+rule yazar_HE_free_nojk_all:
+    input:
+        out = expand('analysis/yazar/{params}/he.npy',
+                        params=yazar_paramspace.instance_patterns),
+
+
 rule yazar_HE_togz:
     input:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.npy',
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
     output:
-        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.gz',
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.csv',
     script: '../bin/yazar/he.togz.py'
 
 
@@ -715,7 +754,8 @@ use rule yazar_HE_free as yazar_HE_free_jk with:
         iid = False,
         full = False,
     resources:
-        mem_mb = '20G',
+        partition = 'tier2q',
+        mem_mb = '16G',
 
 
 use rule yazar_HE_free_merge as yazar_HE_free_jk_merge with:
@@ -731,7 +771,7 @@ use rule yazar_HE_togz as yazar_HE_free_jk_togz with:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.npy',
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
     output:
-        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.gz',
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.csv',
 
 
 
@@ -797,19 +837,14 @@ rule yazar_eds:
         eds.to_csv(output.eds, sep='\t', index=False)
 
 
-# rule yazar_eds_all:
-#     input:
-#         h2 = expand('results/yazar/{params}/matrix.cor.png', params=yazar_paramspace.instance_patterns),
-
-
 
 
 #######################################################################################
 # LDSC
 #######################################################################################
 gwass = config['yazar']['gwas']
-neg_traits = ['Height', 'CAD', 'SCZ'] 
-pos_traits = ['UC', 'RA', 'PBC', 'MS', 'Crohns', 'Celiac', 'Lupus']
+neg_traits = config['yazar']['neg_traits'] 
+pos_traits = config['yazar']['pos_traits']
 traits = neg_traits + pos_traits
 
 # gcta
@@ -824,6 +859,7 @@ rule yazar_gcta_grm:
         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship/gene.grm.bin',  # file size: each gene has ~1.7 MB bin and ~1.7 MB N.bin
         r = int(float(config['yazar']['radius'])),
     resources:
+        partition = 'tier2q',
         mem_mb = '20G',
     shell:
         '''
@@ -908,6 +944,7 @@ rule yazar_gcta_greml_op_merge:
                     f.write(f'{gene}\t{h2}\t{pval}\n')
 
 
+# LDSC
 rule yazar_ldsc_make_geneset:
     input:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.npy',
@@ -1009,7 +1046,7 @@ rule yazar_ldsc_rmMHC:
         if [ {wildcards.chr} -eq {params.chr} ]; then
             awk -v start={params.start} -v end={params.end} '($4 < start || $4 > end) {{print $2}}' {input.bim} > {output.bed}.tmp.snps
 
-            ${{config[plink_load]}} --bfile $input_prefix  --extract {output.bed}.tmp.snps \
+            plink --bfile $input_prefix  --extract {output.bed}.tmp.snps \
                     --make-bed --out $output_prefix
             rm {output.bed}.tmp.snps
         else
@@ -1184,6 +1221,7 @@ rule yazar_ldsc_gwas_addP:
         gwas = lambda wildcards: gwass[wildcards.gwas],
     output:
         gwas = 'staging/data/ldsc/{gwas}.gz',
+    resources: mem_mb = '3G',
     run:
         from scipy.stats import norm
 
@@ -1209,9 +1247,8 @@ rule yazar_ldsc_format_gwas:
         gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
     params:
         prefix = lambda wildcards, output: re.sub('\.sumstats.gz$', '', output.gwas),
-    resources:
-        mem_mb = '10G',
     conda: '../../ldsc/environment.yml'
+    resources: mem_mb = '3G',
     shell:
         # NOTE: assmuning A1 is trait-increasing
         '''
@@ -1262,8 +1299,6 @@ rule yazar_ldsc_seg_regression:
         ref_ld = lambda wildcards, input: re.sub('1.l2.ldscore.gz', '', input.ref_ld[0]),
         weight = lambda wildcards, input: re.sub('1.l2.ldscore.gz', '', input.weight[0]),
         out = lambda wildcards, output: re.sub('\.cell_type_results.txt', '', output.out),
-    resources:
-        mem_mb = '10G',
     conda: '../../ldsc/environment.yml'
     shell:
         '''
@@ -1336,7 +1371,6 @@ use rule yazar_ldsc_seg_regression_summary as yazar_ldsc_controlmean_seg_regress
 
 rule yazar_ldsc_all:
     input:
-        # h2_cts = expand('results/yazar/ind_min_cellnum~10_ct_min_cellnum~10_prop~0.9_geno_pca_n~6_op_pca_n~1_batch~shared_fixed~shared/ldsc/top_{ngene}/window_{window}/he.h2_cts.png',
         h2_cts = expand('results/yazar/{params}/ldsc/top_{ngene}/window_{window}/he.h2_cts.png',
                         params=yazar_paramspace.instance_patterns, 
                         ngene = [0, 100, 200, 300],
@@ -1547,9 +1581,10 @@ use rule yazar_HE_free as yazar_trans_HE_free with:
     params:
         chrs = chrs,
         snps = 5, # threshold of snp number per gene
-        iid = True,
+        iid = False,
         full = False,
     resources:
+        partition = 'tier2q',
         mem_mb = lambda wildcards:'40G' if wildcards.batch != 'shared' else '20G',
 
 
@@ -1566,7 +1601,7 @@ use rule yazar_HE_togz as yazar_trans_HE_togz with:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.npy',
         P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
     output:
-        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.gz',
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.csv',
 
 
 use rule yazar_trans_HE_free as yazar_trans_HE_free_jk with:
@@ -1948,5 +1983,2151 @@ rule yazar_all:
         #                 params=yazar_paramspace.instance_patterns),
         trans = expand('analysis/yazar/{params}/trans/he.npy',
                         params=yazar_paramspace.instance_patterns),
+
+
+
+
+
+
+
+
+
+
+
+
+######################################################################
+# Rare variant analysis for Yazar et al. 2022
+######################################################################
+rule yazar_rare_geno_pca:
+    input:
+        bed = expand('analysis/yazar/data/geno/chr{chr}.bed',
+                chr=range(1,23)),
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+    output:
+        eigenvec = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.maf{{maf}}.eigenvec',
+        eigenval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.maf{{maf}}.eigenval',
+    params:
+        prefix = lambda wildcards, output: os.path.splitext(output.eigenvec)[0],
+        tmp_dir = lambda wildcards, output: os.path.splitext(output.eigenvec)[0] + '_tmp',
+    resources:
+        partition = 'tier3q',
+        mem_mb = '40G',
+    shell:
+        '''
+        # load plink 1.9
+        {config[plink_load]}
+
+        if [ -d {params.tmp_dir} ]; then 
+            rm -r {params.tmp_dir} 
+        fi
+        mkdir -p {params.tmp_dir}
+        ind_f="{params.tmp_dir}/inds.txt" 
+        zcat {input.P}|tail -n +2|awk '{{print $1,$1}}' > $ind_f
+        merge_f="{params.tmp_dir}/merge.list"
+        touch $merge_f
+        for bed in {input.bed} 
+        do 
+            prefix="$(dirname $bed)/$(basename $bed .bed)"
+            o_prefix="{params.tmp_dir}/$(basename $bed .bed)"
+            echo $o_prefix >> $merge_f
+            plink --bfile $prefix \
+                --maf {wildcards.maf} \
+                --keep $ind_f \
+                --make-bed --out $o_prefix
+        done
+        # merge
+        merged={params.tmp_dir}/merged
+        plink --merge-list $merge_f --out $merged
+        # ld prune 
+        plink --bfile $merged --indep-pairwise 50 5 0.2 --out $merged
+        plink --bfile $merged --extract $merged.prune.in --make-bed --out $merged.ld
+        # pca
+        plink --bfile $merged.ld --pca 50 header tabs --out {params.prefix}
+        rm -r {params.tmp_dir}
+        '''
+
+
+rule yazar_rare_he_kinship:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{{chr}}.maf{{maf}}.npy',
+    params:
+        r = int(float(config['yazar']['radius'])),
+    resources:
+        mem_mb = lambda wildcards: '20G' if wildcards.chr != '1' else '80G',
+    shell: 
+        '''
+        # load plink 1.9
+        {config[plink_load]}
+        
+        python3 workflow/bin/yazar/kinship.npy.maf.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
+                        {wildcards.maf} {output.kinship} 
+        '''
+
+
+use rule yazar_he_kinship_split as yazar_rare_he_kinship_split_part1 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch1],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.maf{{maf}}.batch{i}.npy')
+                    for i in batch1],
+
+
+use rule yazar_he_kinship_split as yazar_rare_he_kinship_split_part2 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch2],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.maf{{maf}}.batch{i}.npy')
+                    for i in batch2],
+
+
+use rule yazar_he_kinship_split as yazar_rare_he_kinship_split_part3 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch3],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.maf{{maf}}.batch{i}.npy')
+                    for i in batch3],
+
+
+use rule yazar_he_kinship_split as yazar_rare_he_kinship_split_part4 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch4],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.maf{{maf}}.batch{i}.npy')
+                    for i in batch4],
+
+
+use rule yazar_HE_free as yazar_rare_HE_free_jk with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.maf{{maf}}.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.maf{{maf}}.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.maf{{maf}}.batch{{i}}.jk.npy',
+    params:
+        jk = True,
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        partition = 'tier2q',
+        mem_mb = '16G',
+
+
+use rule yazar_HE_free_merge as yazar_rare_HE_free_jk_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.maf{{maf}}.batch{i}.jk.npy'
+            for i in range(yazar_reml_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.maf{{maf}}.jk.npy',
+
+
+
+
+
+
+
+
+
+
+
+##########################################################################
+# LDSC
+##########################################################################
+# gcta
+rule yazar_rare_gcta_grm:
+    input:
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/kinship.chr{{chr}}.txt',
+    params:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/kinship/gene.grm.bin',  # file size: each gene has ~1.7 MB bin and ~1.7 MB N.bin
+        r = int(float(config['yazar']['radius'])),
+    resources:
+        mem_mb = '20G',
+    shell:
+        '''
+        # load plink 1.9 and gcta
+        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9 gcta/1.94.1
+
+        mkdir -p $(dirname {params.kinship})
+        python3 workflow/bin/yazar/kinship.py \
+                {input.genes} {input.P} {params.r} \
+                {input.bed} {wildcards.chr} \
+                {params.kinship} {output.kinship} {wildcards.maf}
+        '''
+
+use rule yazar_gcta_split_kinship as yazar_rare_gcta_split_kinship with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/kinship.chr{chr}.txt'
+                for chr in range(1,23)],
+    output:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/kinship.batch{i}.txt'
+                for i in range(yazar_he_batches)],
+
+
+use rule yazar_gcta_greml_op as yazar_rare_gcta_greml_op with:
+    input:
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.final.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/kinship.batch{{i}}.txt',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.maf{{maf}}.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/op.greml.batch{{i}}',
+    params:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/rep/op.hsq',
+        snps = 5, # threshold of snp number per gene
+
+
+use rule yazar_gcta_greml_op_merge as yazar_rare_gcta_greml_op_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/op.greml.batch{i}'
+                for i in range(yazar_he_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/op.greml',
+
+
+use rule yazar_ldsc_make_geneset as yazar_rare_ldsc_make_geneset with:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.maf{{maf}}.jk.npy',
+        location = 'data/Yazar2022Science/gene_location.txt',
+        gcta = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta/maf{{maf}}/op.greml',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/all.genes.maf{{maf}}.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/random.genes.maf{{maf}}.txt',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/shared.genes.maf{{maf}}.txt',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/var.genes.maf{{maf}}.txt',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/mean.genes.maf{{maf}}.txt',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/gcta.genes.maf{{maf}}.txt',
+    params:
+        seed = 12345,
+        chr = config['ldsc']['mhc']['chr'],
+        start = config['ldsc']['mhc']['start'],
+        end = config['ldsc']['mhc']['end'],
+
+
+use rule yazar_ldsc_make_annot as yazar_rare_ldsc_make_annot with:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/all.genes.maf{{maf}}.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/random.genes.maf{{maf}}.txt',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/shared.genes.maf{{maf}}.txt',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/var.genes.maf{{maf}}.txt',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/mean.genes.maf{{maf}}.txt',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/gcta.genes.maf{{maf}}.txt',
+        gene_coord = 'staging/data/ldsc/genecoord.txt',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+    output:
+        tmp_all = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/all.maf{{maf}}.{{chr}}.annot.tmp.gz'),
+        tmp_random = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/random.maf{{maf}}.{{chr}}.annot.tmp.gz'),
+        tmp_shared = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/shared.maf{{maf}}.{{chr}}.annot.tmp.gz'),
+        tmp_var = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/var.maf{{maf}}.{{chr}}.annot.tmp.gz'),
+        tmp_mean = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/mean.maf{{maf}}.{{chr}}.annot.tmp.gz'),
+        tmp_gcta = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/gcta.maf{{maf}}.{{chr}}.annot.tmp.gz'),
+        bim = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/{{chr}}.maf{{maf}}.bim'),
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/all.maf{{maf}}.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/random.maf{{maf}}.{{chr}}.annot.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/shared.maf{{maf}}.{{chr}}.annot.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/var.maf{{maf}}.{{chr}}.annot.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/mean.maf{{maf}}.{{chr}}.annot.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/gcta.maf{{maf}}.{{chr}}.annot.gz',
+
+
+
+use rule yazar_ldsc_compldscore as yazar_rare_ldsc_compldscore with:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/all.maf{{maf}}.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/random.maf{{maf}}.{{chr}}.annot.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/shared.maf{{maf}}.{{chr}}.annot.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/var.maf{{maf}}.{{chr}}.annot.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/mean.maf{{maf}}.{{chr}}.annot.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/gcta.maf{{maf}}.{{chr}}.annot.gz',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+        hapmap3 = 'data/ldsc/hm3_no_MHC.list.txt',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/all.maf{{maf}}.{{chr}}.l2.ldscore.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/random.maf{{maf}}.{{chr}}.l2.ldscore.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/shared.maf{{maf}}.{{chr}}.l2.ldscore.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/var.maf{{maf}}.{{chr}}.l2.ldscore.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/mean.maf{{maf}}.{{chr}}.l2.ldscore.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/gcta.maf{{maf}}.{{chr}}.l2.ldscore.gz',
+
+
+use rule yazar_ldsc_seg_make_ldcts as yazar_rare_ldsc_seg_make_ldcts with:
+    input:
+        shared = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/shared.maf{{maf}}.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        var = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/var.maf{{maf}}.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        mean = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/mean.maf{{maf}}.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        gcta = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/gcta.maf{{maf}}.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        control = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/all.maf{{maf}}.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+    output: 
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/he.maf{{maf}}.ldcts',
+
+
+use rule yazar_ldsc_seg_regression as yazar_rare_ldsc_seg_regression with:
+    input:
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/he.maf{{maf}}.ldcts',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau  
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/he.{{gwas}}.maf{{maf}}.cell_type_results.txt',
+
+
+use rule yazar_ldsc_seg_regression_summary as yazar_rare_ldsc_seg_regression_summary with:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/he.{gwas}.maf{{maf}}.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{{ngene}}/window_{{window}}/he.maf{{maf}}.h2_cts.png',
+
+
+ngenes = [0, 100, 200, 300]
+windows = [300000, 500000, 700000]
+mafs = ['0.01', '1e-10']
+rule yazar_rare_ldsc_agg:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/top_{ngene}/window_{window}/he.{gwas}.maf{maf}.cell_type_results.txt'
+                    for maf in mafs for ngene in ngenes for window in windows for gwas in traits],
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc/he.rare.cell_type_results.txt'
+    params:
+        traits = traits,
+        windows = windows,
+        ngenes = ngenes,
+        mafs = mafs,
+    resources: mem_mb = '1G',
+    run:
+        df = []
+        i = 0
+        for maf in mafs:
+            for ngene in ngenes:
+                for window in windows:
+                    for gwas in traits:
+                        f = input.stacked[i]
+                        assert maf in f and str(ngene) in f and str(window) in f and gwas in f, f
+                        i += 1
+                        df_tmp = pd.read_table(f)
+                        df_tmp['trait'] = gwas
+                        df_tmp['ngene'] = ngene
+                        df_tmp['window'] = window
+                        df_tmp['maf'] = maf
+                        df.append(df_tmp)
+        df = pd.concat(df)
+        df.to_csv(output.out, sep='\t', index=False)
+
+
+rule yazar_rare_ldsc_all:
+    input:
+        out = expand('results/yazar/{params}/ldsc/he.rare.cell_type_results.txt',
+                        params=yazar_paramspace.instance_patterns),
+
+        # h2_cts = expand('results/yazar/{params}/ldsc/top_{ngene}/window_{window}/he.maf{maf}.h2_cts.png',
+        #                 params=yazar_paramspace.instance_patterns, 
+        #                 ngene = [0, 100, 200, 300],
+        #                 window=[300000, 500000, 700000],
+        #                 maf=['0.01', '1e-10']),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##########################################################################
+## 1.2: joint fit of rare and common variants
+##########################################################################
+
+rule yazar_joint_rare_he_kinship:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.allgene.chr{{chr}}.min_maf{{min_maf}}.max_maf{{maf}}.npy',
+    params:
+        r = int(float(config['yazar']['radius'])),
+    resources:
+        mem_mb = lambda wildcards: '20G' if wildcards.chr != '1' else '80G',
+    shell: 
+        '''
+        # load plink 1.9
+        {config[plink_load]}
+        
+        python3 workflow/bin/yazar/kinship.npy.min_max_maf.py {input.genes} {input.ctp} {params.r} {input.bed} {wildcards.chr} \
+                        {wildcards.min_maf} {wildcards.maf} {output.kinship} 
+        '''
+
+
+rule yazar_joint_rare_filter_genes:
+    input:
+        kinship = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{{chr}}.npy',
+        rare_kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.allgene.chr{{chr}}.min_maf{{min_maf}}.max_maf{{maf}}.npy',
+    output:
+        rare_kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{{chr}}.min_maf{{min_maf}}.max_maf{{maf}}.npy',
+    resources:
+        mem_mb = lambda wildcards: '8G' if wildcards.chr != '1' else '20G',
+    run:
+        common_kinship = np.load(input.kinship, allow_pickle=True).item()
+        rare_kinship = np.load(input.rare_kinship, allow_pickle=True).item()
+        # remove id from rare kinship
+        ids = rare_kinship['ids']
+        del rare_kinship['ids']
+
+        # filter genes in common kinship
+        filter = np.isin(rare_kinship['gene'], common_kinship['gene'])
+        for k, v in rare_kinship.items():
+            rare_kinship[k] = [item for item, f in zip(v, filter) if f]
+
+        # add ids back
+        rare_kinship['ids'] = ids
+
+        np.save(output.rare_kinship, rare_kinship)
+
+
+use rule yazar_he_kinship_split as yazar_joint_rare_he_kinship_split_part1 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.min_maf{{min_maf}}.max_maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch1],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.min_maf{{min_maf}}.max_maf{{maf}}.batch{i}.npy')
+                    for i in batch1],
+
+
+use rule yazar_he_kinship_split as yazar_joint_rare_he_kinship_split_part2 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.min_maf{{min_maf}}.max_maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch2],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.min_maf{{min_maf}}.max_maf{{maf}}.batch{i}.npy')
+                    for i in batch2],
+
+
+use rule yazar_he_kinship_split as yazar_joint_rare_he_kinship_split_part3 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.min_maf{{min_maf}}.max_maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch3],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.min_maf{{min_maf}}.max_maf{{maf}}.batch{i}.npy')
+                    for i in batch3],
+
+
+use rule yazar_he_kinship_split as yazar_joint_rare_he_kinship_split_part4 with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.min_maf{{min_maf}}.max_maf{{maf}}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch4],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.min_maf{{min_maf}}.max_maf{{maf}}.batch{i}.npy')
+                    for i in batch4],
+
+
+use rule yazar_HE_free as yazar_joint_rare_HE_free with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+        promoter = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.min_maf{{min_maf}}.max_maf{{maf}}.batch{{i}}.npy',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.min_maf{{min_maf}}.max_maf{{maf}}.batch{{i}}.npy',
+    params:
+        jk = False,
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        mem_mb = lambda wildcards:'40G' if wildcards.batch != 'shared' else '20G',
+
+
+use rule yazar_HE_free_merge as yazar_joint_rare_HE_free_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.free.min_maf{{min_maf}}.max_maf{{maf}}.batch{i}.npy'
+            for i in range(yazar_reml_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.min_maf{{min_maf}}.max_maf{{maf}}.npy',
+
+
+rule yazar_joint_rare_all:
+    input:
+        out = expand('analysis/yazar/{params}/he.free.min_maf{{min_maf}}.max_maf{{maf}}.npy',
+                        params=yazar_paramspace.instance_patterns, min_maf='0.01', maf='0.05'),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#########################################################################
+# downsampling cells
+#########################################################################
+rule yazar_cellsampling_ctp_transform:
+    input:
+        h5ad = 'data/Yazar2022Science/OneK1K_cohort_gene_expression_matrix_14_celltypes.h5ad.gz',
+        var = 'data/Yazar2022Science/var.txt',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        X = 'staging/yazar/sampling_{max_cells}cells/X.npz',
+        obs = 'staging/yazar/sampling_{max_cells}cells/obs.gz',
+        var = 'staging/yazar/sampling_{max_cells}cells/var.gz',
+    params:
+        ind_col = yazar_ind_col,
+        ct_col = yazar_ct_col,
+        pool_col = yazar_pool_col,
+    resources:
+        partition = 'tier3q',
+        mem_mb = '120G',
+    script: '../bin/yazar/transform.sampling.py'
+
+
+use rule yazar_ctp as yazar_cellsampling_ctp with:
+    input:
+        X = 'staging/yazar/sampling_{max_cells}cells/X.npz',
+        obs = 'staging/yazar/sampling_{max_cells}cells/obs.gz',
+        var = 'staging/yazar/sampling_{max_cells}cells/var.gz',
+    output:
+        ctp = 'staging/yazar/sampling_{max_cells}cells/ctp.gz',
+        ctnu = 'staging/yazar/sampling_{max_cells}cells/ctnu.gz',
+        P = 'staging/yazar/sampling_{max_cells}cells/P.gz',
+        n = 'staging/yazar/sampling_{max_cells}cells/n.gz',
+
+
+# data check
+use rule yazar_cell_dist as yazar_cellsampling_cell_dist with:
+    input:
+        obs = 'staging/yazar/sampling_{max_cells}cells/obs.gz',
+    output:
+        png = 'results/yazar/sampling_{max_cells}cells/cell.dist.png',
+
+
+use rule yazar_rm_rareINDnCT as yazar_cellsampling_rm_rareINDnCT with:
+    # also select gene expressed in all cts
+    input:
+        ctp = 'staging/yazar/sampling_{max_cells}cells/ctp.gz',
+        ctnu = 'staging/yazar/sampling_{max_cells}cells/ctnu.gz',
+        n = 'staging/yazar/sampling_{max_cells}cells/n.gz',
+    output:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.gz',
+        P = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/mvn/P.final.gz',
+        n = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/mvn/n.final.gz',
+
+
+use rule yazar_rm_missingIND as yazar_cellsampling_rm_missingIND with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.gz',
+        P = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/mvn/P.final.gz',
+        n = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/mvn/n.final.gz',
+    output:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.rmid.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/P.final.gz',
+        n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/n.final.gz',
+
+
+use rule yazar_std_op as yazar_cellsampling_std_op with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.rmid.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/P.final.gz',
+    output:
+        op = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/op.std.gz',
+        nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/nu.std.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.std.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.std.gz',
+
+
+use rule yazar_exclude_sexchr as yazar_cellsampling_exclude_sexchr with:
+    input:
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        op = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/op.std.gz',
+        nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/nu.std.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.std.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.std.gz',
+    output:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/op.final.gz',
+        nu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/nu.final.gz',
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.final.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.final.gz',
+
+
+use rule yazar_op_pca as yazar_cellsampling_op_pca with:
+    input:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/op.final.gz',
+    output:
+        evec = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/evec.gz',
+        eval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/eval.gz',
+        pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/pca.gz',
+        png = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/op.pca.png',
+
+
+# use rule yazar_he_kinship as yazar_cellsampling_he_kinship with:
+#     input:
+#         ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.final.gz',
+#         genes = 'data/Yazar2022Science/gene_location.txt',
+#         bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+#     output:
+#         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/kinship.chr{{chr}}.npy',
+
+
+use rule yazar_HE_split as yazar_cellsampling_he_split with:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.final.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctnu.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+    output:
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        ctnu = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctnu.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctp.batch.txt',
+
+
+use rule yazar_he_kinship_split as yazar_cellsampling_he_kinship_split with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.npy'
+                    for chr in chrs], # NOTE: using main analysis
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/kinship.batch{i}.npy')
+                    for i in range(yazar_he_batches)],
+
+
+use rule yazar_HE_free as yazar_cellsampling_HE_free with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec', # NOTE: using main analysis
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he.batch{{i}}.npy',
+    params:
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        partition = 'tier2q',
+        mem_mb = '16G',
+
+
+use rule yazar_HE_free_merge as yazar_cellsampling_HE_free_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he.batch{i}.npy'
+            for i in range(yazar_he_batches)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/he.npy',
+
+
+rule yazar_cellsampling_merge:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{max_cells}cells/he.npy'
+                      for max_cells in [11, 20, 50, 100, 200, 300, 400, 500]],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cellsampling.he.npy',
+    params:
+        max_cells = [11, 20, 50, 100, 200, 300, 400, 500],
+    run:
+        out = {}
+        for f, key in zip(input.out, params.max_cells):
+            out[key] = np.load(f, allow_pickle=True).item()
+        np.save(output.out, out)
+
+
+rule yazar_cellsampling_all:
+    input:
+        out = expand('analysis/yazar/{params}/cellsampling.he.npy',
+                        params=yazar_paramspace.instance_patterns),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#########################################################################
+# downsampling reads
+#########################################################################
+use rule yazar_cellsampling_ctp_transform as yazar_readsampling_ctp_transform with:
+    input:
+        h5ad = 'data/Yazar2022Science/OneK1K_cohort_gene_expression_matrix_14_celltypes.h5ad.gz',
+        var = 'data/Yazar2022Science/var.txt',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        X = 'staging/yazar/sampling_{prop_reads}reads/X.npz',
+        obs = 'staging/yazar/sampling_{prop_reads}reads/obs.gz',
+        var = 'staging/yazar/sampling_{prop_reads}reads/var.gz',
+
+
+use rule yazar_ctp as yazar_readsampling_ctp with:
+    input:
+        X = 'staging/yazar/sampling_{prop_reads}reads/X.npz',
+        obs = 'staging/yazar/sampling_{prop_reads}reads/obs.gz',
+        var = 'staging/yazar/sampling_{prop_reads}reads/var.gz',
+    output:
+        ctp = 'staging/yazar/sampling_{prop_reads}reads/ctp.gz',
+        ctnu = 'staging/yazar/sampling_{prop_reads}reads/ctnu.gz',
+        P = 'staging/yazar/sampling_{prop_reads}reads/P.gz',
+        n = 'staging/yazar/sampling_{prop_reads}reads/n.gz',
+
+
+# data check
+use rule yazar_cell_dist as yazar_readsampling_cell_dist with:
+    input:
+        obs = 'staging/yazar/sampling_{prop_reads}reads/obs.gz',
+    output:
+        png = 'results/yazar/sampling_{prop_reads}reads/cell.dist.png',
+
+
+use rule yazar_rm_rareINDnCT as yazar_readsampling_rm_rareINDnCT with:
+    # also select gene expressed in all cts
+    input:
+        ctp = 'staging/yazar/sampling_{prop_reads}reads/ctp.gz',
+        ctnu = 'staging/yazar/sampling_{prop_reads}reads/ctnu.gz',
+        n = 'staging/yazar/sampling_{prop_reads}reads/n.gz',
+    output:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.gz',
+        P = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/mvn/P.final.gz',
+        n = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/mvn/n.final.gz',
+
+
+use rule yazar_rm_missingIND as yazar_readsampling_rm_missingIND with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.gz',
+        P = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/mvn/P.final.gz',
+        n = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/mvn/n.final.gz',
+    output:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.rmid.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/P.final.gz',
+        n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/n.final.gz',
+
+
+use rule yazar_std_op as yazar_readsampling_std_op with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.rmid.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/P.final.gz',
+    output:
+        op = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/op.std.gz',
+        nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/nu.std.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.std.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.std.gz',
+
+
+use rule yazar_exclude_sexchr as yazar_readsampling_exclude_sexchr with:
+    input:
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        op = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/op.std.gz',
+        nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/nu.std.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.std.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.std.gz',
+    output:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/op.final.gz',
+        nu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/nu.final.gz',
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.final.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.final.gz',
+
+
+use rule yazar_op_pca as yazar_readsampling_op_pca with:
+    input:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/op.final.gz',
+    output:
+        evec = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/evec.gz',
+        eval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/eval.gz',
+        pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/pca.gz',
+        png = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/op.pca.png',
+
+
+# use rule yazar_he_kinship as yazar_cellsampling_he_kinship with:
+#     input:
+#         ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/ctp.final.gz',
+#         genes = 'data/Yazar2022Science/gene_location.txt',
+#         bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+#     output:
+#         kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{max_cells}}cells/kinship.chr{{chr}}.npy',
+
+
+use rule yazar_HE_split as yazar_readsampling_he_split with:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctp.final.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/ctnu.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+    output:
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        ctnu = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctnu.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctp.batch.txt',
+
+
+use rule yazar_he_kinship_split as yazar_readsampling_he_kinship_split with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.chr{chr}.npy'
+                    for chr in chrs], # NOTE: using main analysis
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctp.batch{i}.gz'
+                for i in range(yazar_he_batches)],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/kinship.batch{i}.npy')
+                    for i in range(yazar_he_batches)],
+
+
+use rule yazar_HE_free as yazar_readsampling_HE_free with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec', # NOTE: using main analysis
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he.batch{{i}}.npy',
+    params:
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        partition = 'tier2q',
+        mem_mb = '16G',
+
+
+
+use rule yazar_HE_free_merge as yazar_readsampling_HE_free_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he.batch{i}.npy'
+            for i in range(yazar_he_batches)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{{prop_reads}}reads/he.npy',
+
+
+
+rule yazar_readsampling_merge:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/sampling_{prop_reads}reads/he.npy'
+                      for prop_reads in [0.25, 0.5, 0.75, 0.8, 0.9, 0.95]],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/readsampling.he.npy',
+    params:
+        prop_reads = [0.25, 0.5, 0.75, 0.8, 0.9, 0.95],
+    run:
+        out = {}
+        for f, key in zip(input.out, params.prop_reads):
+            out[key] = np.load(f, allow_pickle=True).item()
+        np.save(output.out, out)
+
+
+rule yazar_readsampling_all:
+    input:
+        out = expand('analysis/yazar/{params}/readsampling.he.npy',
+                        params=yazar_paramspace.instance_patterns),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##########################################################################
+# LDSC for each cell type
+##########################################################################
+rule yazar_ldscperct_make_geneset:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.npy',
+        location = 'data/Yazar2022Science/gene_location.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/all.genes.txt',
+        genes = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/sig.gene_cts.txt',
+    params:
+        chr = config['ldsc']['mhc']['chr'],
+        start = config['ldsc']['mhc']['start'],
+        end = config['ldsc']['mhc']['end'],
+    run:
+        from cigma import util
+
+        P = pd.read_table(input.P, index_col=0)
+        cts = P.columns.tolist()
+        out = np.load(input.out, allow_pickle=True).item()
+        data = util.read_out(out, ['gene', 'p:free:V', 'p:free:vc'], cts)
+        ngene = data.shape[0]
+        gene_df = pd.read_table(input.location)
+
+        # remove hla genes: https://www.ncbi.nlm.nih.gov/grc/human/regions/MHC?asm=GRCh37
+        gene_df = gene_df.loc[~((gene_df['chr'] == params.chr) & (gene_df['end'] > params.start) & (gene_df['start'] < params.end))]
+        filter = np.isin(data['gene'], gene_df['feature'])
+        data = data.loc[filter]
+
+        # filter genes
+        genes = data['gene']
+        p = data['p:free:V']
+
+        # control
+        np.savetxt(output.all, genes, fmt='%s')
+
+        # find sig genes for each ct
+        sig = data.loc[data['p:free:V'] < (0.05 / ngene)]
+        gene_ct_pairs = []
+        for ct in cts:
+            sig_gene_ct = sig.loc[sig[f'p:free:vc_{ct}'] < (0.5 / ngene), ['gene']]
+            sig_gene_ct['ct'] = ct
+            gene_ct_pairs.append(sig_gene_ct)
+
+        gene_ct_pairs = pd.concat(gene_ct_pairs)
+        gene_ct_pairs.to_csv(output.genes, sep='\t', index=False)
+
+
+rule yazar_ldscperct_seg_make_ldcts:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/all.genes.txt',
+        genes = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/sig.gene_cts.txt',
+        gene_coord = 'staging/data/ldsc/genecoord.txt',
+        bim = expand('analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim', chr=chrs),
+        hapmap3 = 'data/ldsc/hm3_no_MHC.list.txt',
+    output: 
+        ct_genes = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/sig_gene.ct.txt'),
+        annot_all = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/all.{chr}.annot.gz'
+                        for chr in chrs],
+        all = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/all.{chr}.l2.ldscore.gz'
+                        for chr in chrs],
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/he.ldcts',
+    params:
+        chrs = chrs,
+        annot_genes = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/sig_genes.{chr}.annot.gz'
+                        for chr in chrs],
+        genes = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/sig_genes.{chr}.l2.ldscore.gz'
+                        for chr in chrs],
+    conda: '../../ldsc/environment.yml'
+    script: '../bin/yazar/ldscperct_seg_make_ldcts.py'
+
+
+use rule yazar_ldsc_seg_regression as yazar_ldscperct_seg_regression with:
+    input:
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/he.ldcts',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau  
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/he.{{gwas}}.cell_type_results.txt',
+
+
+use rule yazar_ldsc_seg_regression_summary as yazar_ldscperct_seg_regression_summary with:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/he.{gwas}.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldscperct/window_{{window}}/he.h2_cts.png',
+
+
+rule yazar_ldscperct_all:
+    input:
+        h2_cts = expand('results/yazar/{params}/ldscperct/window_{window}/he.h2_cts.png',
+                        params=yazar_paramspace.instance_patterns, 
+                        window=[300000, 500000, 700000]),
+
+
+
+
+
+
+
+
+
+
+
+
+##########################################################################
+# LDSC for random genes
+##########################################################################
+random_replicates = 40
+random_batches = 25
+
+
+rule ldscrandom_make_geneset:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.npy',
+        location = 'data/Yazar2022Science/gene_location.txt',
+        gcta = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta/op.greml',
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/all.genes.txt',
+        target = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/var.genes.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/random.genes.tar',
+        genes = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/genes.txt',
+    params:
+        random = [f'random.genes.set{i}.batch{k}.txt' for i in range(random_replicates) for k in range(random_batches)],
+        seed = 123,
+        chr = config['ldsc']['mhc']['chr'],
+        start = config['ldsc']['mhc']['start'],
+        end = config['ldsc']['mhc']['end'],
+    shadow: 'shallow'
+    resources: mem_mb = '3G',
+    script: '../bin/yazar/ldscrandom_make_geneset2.py'
+
+
+rule ldscrandom_make_annot:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/all.genes.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/random.genes.tar',
+        gene_coord = 'staging/data/ldsc/genecoord.txt',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+    output:
+        tmp_all = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/all.batch{{k}}.{{chr}}.annot.tmp'),
+        bim = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/batch{{k}}.{{chr}}.bim'),
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/all.batch{{k}}.{{chr}}.annot.gz',
+        random = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/random.batch{{k}}.{{chr}}.annot.tar'),
+    params:
+        random_replicates = random_replicates,
+        random = [f'random.genes.set{i}.batch{{k}}.txt' for i in range(random_replicates)],
+        tmp_random_annot = [f'random.set{i}.batch{{k}}.{{chr}}.annot.tmp' for i in range(random_replicates)],
+        random_annot = [f'random.set{i}.batch{{k}}.{{chr}}.annot.gz' for i in range(random_replicates)],
+        folder = 'ldsc_tmp',
+    group: "ldscrandom"
+    shadow: 'shallow'
+    resources: mem_mb = 3000,
+    conda: '../../ldsc/environment.yml'
+    shell:
+        '''
+        # all genes
+        python ldsc/make_annot.py \
+            --gene-set-file {input.all} \
+            --gene-coord-file {input.gene_coord} \
+            --windowsize {wildcards.window} \
+            --bimfile {input.bim} \
+            --annot-file {output.tmp_all}
+
+        # add snp info
+        echo -e 'CHR\\tBP\\tSNP\\tCM' > {output.bim}
+        awk 'BEGIN {{OFS = "\\t"}} {{print $1, $4, $2, $3}}' {input.bim} >> {output.bim}
+        paste {output.bim} {output.tmp_all} | gzip -c > {output.all}
+
+        # random genes
+        tar -xvf {input.random} -C .
+        randoms=({params.random})
+        tmp_randoms=({params.tmp_random_annot})
+        output_randoms=({params.random_annot})
+        mkdir -p {params.folder}
+        for i in $(seq 0 $(({params.random_replicates}-1))); do
+            echo $i
+            python ldsc/make_annot.py \
+                --gene-set-file "${{randoms[$i]}}" \
+                --gene-coord-file {input.gene_coord} \
+                --windowsize {wildcards.window} \
+                --bimfile {input.bim} \
+                --annot-file "${{tmp_randoms[$i]}}"
+
+            paste {output.bim} "${{tmp_randoms[$i]}}" | gzip -c > {params.folder}/"${{output_randoms[$i]}}"
+        done
+        tar -cvf {output.random} {params.folder}
+        '''
+
+
+rule ldscrandom_compldscore:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/all.batch{{k}}.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/random.batch{{k}}.{{chr}}.annot.tar',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+        hapmap3 = 'data/ldsc/hm3_no_MHC.list.txt',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/all.batch{{k}}.{{chr}}.l2.ldscore.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/random.batch{{k}}.{{chr}}.l2.ldscore.tar',
+    params:
+        bfile = lambda wildcards, input: os.path.splitext(input.bim)[0],
+        all = lambda wildcards, output: re.sub('\.l2.ldscore.gz$', '', output.all),
+        random_replicates = random_replicates,
+        random_annot = [f'random.set{i}.batch{{k}}.{{chr}}.annot.gz' for i in range(random_replicates)],
+        random_ldscore = [f'random.set{i}.batch{{k}}.{{chr}}.l2.ldscore.gz' for i in range(random_replicates)],
+        random_ldscore_prefix = [f'random.set{i}.batch{{k}}.{{chr}}' for i in range(random_replicates)],
+        folder = 'ldsc_tmp',
+    group: "ldscrandom"
+    shadow: 'shallow'
+    conda: '../../ldsc/environment.yml'
+    resources: mem_mb = 3000,
+    shell:
+        '''
+        python ldsc/ldsc.py \
+            --l2 \
+            --bfile {params.bfile} \
+            --ld-wind-cm 1 \
+            --annot {input.all} \
+            --out {params.all} \
+            --print-snps {input.hapmap3}
+
+        tar -xvf {input.random} -C .
+        random_annot=({params.random_annot})
+        random_ldscore=({params.random_ldscore_prefix})
+        for i in $(seq 0 $(({params.random_replicates}-1))); do
+            python ldsc/ldsc.py \
+                --l2 \
+                --bfile {params.bfile} \
+                --ld-wind-cm 1 \
+                --annot {params.folder}/"${{random_annot[$i]}}" \
+                --out {params.folder}/"${{random_ldscore[$i]}}" \
+                --print-snps {input.hapmap3}
+        done
+        tar -cvf {output.random} {params.folder}
+        '''
+
+
+rule ldscrandom_seg_make_ldcts:
+    input:
+        random = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/random.batch{{k}}.{chr}.l2.ldscore.tar'
+                    for chr in chrs],
+        control = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/all.batch{{k}}.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+    output: 
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.batch{{k}}.ldcts.tar',
+    params:
+        random_ldscore = [f'random.set{i}.batch{{k}}.1.l2.ldscore.gz' for i in range(random_replicates)],
+        ldcts = [f'he.set{i}.batch{{k}}.ldcts' for i in range(random_replicates)],
+        folder = 'ldsc_tmp',
+    shadow: 'shallow'
+    resources: mem_mb = 1000,
+    run:
+        for random_f, ldct_f in zip(params.random_ldscore, params.ldcts):
+            with open(ldct_f, 'w') as f:
+                f.write('random\t{},{}\n'.format( params.folder + '/' + re.sub('1.l2.ldscore.gz', '', random_f), 
+                                                re.sub('1.l2.ldscore.gz', '', input.control[0]) ))
+        shell('tar -cvf {output.ldcts} {params.ldcts}')
+
+
+rule ldscrandom_seg_regression:
+    input:
+        random = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/random.batch{{k}}.{chr}.l2.ldscore.tar'
+                    for chr in chrs],
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.batch{{k}}.ldcts.tar',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau  
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.{{gwas}}.batch{{k}}.cell_type_results.tar',
+    params:
+        ref_ld = lambda wildcards, input: re.sub('1.l2.ldscore.gz', '', input.ref_ld[0]),
+        weight = lambda wildcards, input: re.sub('1.l2.ldscore.gz', '', input.weight[0]),
+        random_replicates = random_replicates,
+        ldcts = [f'he.set{i}.batch{{k}}.ldcts' for i in range(random_replicates)],
+        out = [f'he.{{gwas}}.set{i}.batch{{k}}.cell_type_results.txt' for i in range(random_replicates)],
+        out_prefix = [f'he.{{gwas}}.set{i}.batch{{k}}' for i in range(random_replicates)],
+        folder = 'ldsc_tmp',
+    shadow: 'shallow'
+    conda: '../../ldsc/environment.yml'
+    resources: mem_mb = 5000,
+    shell:
+        '''
+        tar -xvf {input.ldcts} -C .
+
+        params_out_prefix=({params.out_prefix})
+        ldcts=({params.ldcts})
+        randoms=({input.random})
+
+        for i in $(seq 0 $(({params.random_replicates}-1))); do
+            for f in "${{randoms[@]}}"; do
+                tar -xf "$f" -C . $(tar -tf "$f" | grep "random\\.set${{i}}\\.batch.*")
+            done
+
+            python ldsc/ldsc.py \
+                --h2-ct {input.gwas} \
+                --ref-ld-chr {params.ref_ld} \
+                --out "${{params_out_prefix[$i]}}" \
+                --ref-ld-chr-cts "${{ldcts[$i]}}" \
+                --w-ld-chr {params.weight}
+
+            rm {params.folder}/random.set${{i}}.batch*
+        done
+        tar -cvf {output.out} {params.out}
+        '''
+
+
+rule ldscrandom_agg:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.{{gwas}}.batch{k}.cell_type_results.tar'
+                    for k in range(random_batches)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.{{gwas}}.cell_type_results.txt',
+    params:
+        out = [f'he.{{gwas}}.set{i}.batch{k}.cell_type_results.txt' for i in range(random_replicates) for k in range(random_batches)],
+    resources: mem_mb = '1G',
+    shadow: 'shallow'
+    run:
+        shell('''
+        for f in {input.out}; do
+            tar -xvf $f -C .
+        done
+        ''')
+
+        dfs = [pd.read_table(f).assign(set=i) for i, f in enumerate(params.out)]
+        df = pd.concat(dfs)
+        df.to_csv(output.out, sep='\t', index=False)
+
+
+rule ldscrandom_agg2:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.{gwas}.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.cell_type_results.txt',
+    params:
+        traits = traits,
+    resources: mem_mb = '1G',
+    run:
+        dfs = [pd.read_table(f).assign(gwas=gwas) for gwas, f in zip(params.traits, input.out)]
+        df = pd.concat(dfs)
+        df.to_csv(output.out, sep='\t', index=False)
+
+
+rule ldscrandom_agg3:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{ngene}_gset_{{gset}}_bin_{binsize}_nearbygene_{nearbywindow}/window_500000/he.cell_type_results.txt'
+                    for ngene, binsize, nearbywindow in zip([200, 0 , 200, 200], [500, 500, 500, 1000], ['1e6', '1e6', '5e5', '1e6'])],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/gset_{{gset}}.cell_type_results.txt',
+    resources: mem_mb = '1G',
+    run:
+        # Note: update as needed
+        dfs = []
+        for f, ngene, binsize, nearbywindow in zip(input.out, [200, 0, 200, 200], [500, 500, 500, 1000], [1e6, 1e6, 5e5, 1e6]):
+            df = pd.read_table(f).assign(ngene=ngene, binsize=binsize, nearbywindow=int(float(nearbywindow)))
+            dfs.append(df)
+
+        df = pd.concat(dfs)
+        df.to_csv(output.out, sep='\t', index=False)
+
+
+rule ldscrandom_agg4:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/gset_{gset}.cell_type_results.txt'
+                for gset in ['var', 'shared', 'mean', 'gcta']],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/cell_type_results.txt',
+    resources: mem_mb = '1G',
+    run:
+        dfs = [pd.read_table(f).assign(gset=gset) for f, gset in zip(input.out, ['var', 'shared', 'mean', 'gcta'])]
+        df = pd.concat(dfs)
+        df.to_csv(output.out, sep='\t', index=False)
+
+
+rule ldscrandom_agg2_copy:
+    input:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.cell_type_results.txt',
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ldscrandom/top_{{ngene}}_gset_{{gset}}_bin_{{binsize}}_nearbygene_{{nearbywindow}}/window_{{window}}/he.cell_type_results.txt',
+    resources: mem_mb = '1G',
+    shell:
+        '''
+        cp {input.out} {output.out}
+        '''
+
+
+rule ldscrandom_all:
+    input:
+        out = expand('analysis/yazar/{params}/ldscrandom/cell_type_results.txt',
+                        params=yazar_paramspace.instance_patterns),
+        perct = expand('analysis/yazar/{params}/ldscrandom/top_{ngene}_gset_{gset}_bin_{binsize}_nearbygene_{nearbywindow}/window_500000/he.cell_type_results.txt',
+                        params=yazar_paramspace.instance_patterns,
+                        gset=['BIN', 'BMem', 'CD4ET', 'CD4NC', 'CD8ET', 'CD8NC', 'NK'],
+                        ngene=0, binsize=500, nearbywindow='5e5'),
+
+
+
+
+
+
+##########################################################################
+# cCREs from catlas
+##########################################################################
+rule catlas_download:
+    output:
+        bed = 'data/catlas/Zona_Glomerulosa_Cortical_Cell.bed',
+    params:
+        link = 'https://decoder-genetics.wustl.edu/catlasv1/humanenhancer/data/cCREs/'
+    resources: mem_mb = '1G'
+    shell:
+        '''
+        mkdir -p $(dirname {output.bed})
+        cd $(dirname {output.bed})
+        wget -r -np -nH --cut-dirs=4 -R "index.html*" {params.link}
+        '''
+
+
+rule catlas_merge:
+    input:
+        bed = 'data/catlas/Zona_Glomerulosa_Cortical_Cell.bed',
+    output:
+        cre = 'data/catlas.gz',
+    script: '../bin/yazar/catlas_merge.py'
+
+
+rule catlas_ABC_download:
+    output:
+        B = 'data/catlas/ABC_score.B.gz',
+        T = 'data/catlas/ABC_score.T.gz',
+        NK = 'data/catlas/ABC_score.NK.gz',
+        CD8 = 'data/catlas/ABC_score.CD8.gz',
+        CD4 = 'data/catlas/ABC_score.CD4.gz',
+    params:
+        B = 'https://decoder-genetics.wustl.edu/catlasv1/humanenhancer/data/ABC_scores/Memory%20B.tsv.gz',
+        T = 'https://decoder-genetics.wustl.edu/catlasv1/humanenhancer/data/ABC_scores/Naive%20T.tsv.gz',
+        NK = 'https://decoder-genetics.wustl.edu/catlasv1/humanenhancer/data/ABC_scores/Natural%20Killer%20T.tsv.gz',
+        CD8 = 'https://decoder-genetics.wustl.edu/catlasv1/humanenhancer/data/ABC_scores/T%20Lymphocyte%201%20(CD8+).tsv.gz',
+        CD4 = 'https://decoder-genetics.wustl.edu/catlasv1/humanenhancer/data/ABC_scores/T%20lymphocyte%202%20(CD4+).tsv.gz',
+    resources: mem_mb = '1G'
+    shell:
+        '''
+        wget -O - {params.B} | gunzip -c | gzip -c > {output.B}
+        wget -O - {params.T} | gunzip -c | gzip -c > {output.T}
+        wget -O - {params.NK} | gunzip -c | gzip -c > {output.NK}
+        wget -O - "{params.CD8}" | gunzip -c | gzip -c > {output.CD8}
+        wget -O - "{params.CD4}" | gunzip -c | gzip -c > {output.CD4}
+        '''
+
+
+rule catlas_ABC_merge:
+    input:
+        B = 'data/catlas/ABC_score.B.gz',
+        T = 'data/catlas/ABC_score.T.gz',
+        NK = 'data/catlas/ABC_score.NK.gz',
+        CD8 = 'data/catlas/ABC_score.CD8.gz',
+        CD4 = 'data/catlas/ABC_score.CD4.gz',
+    output:
+        abc = 'analysis/data/catlas/ABC_score.gz',
+    resources: mem_mb = '3G'
+    script: '../bin/yazar/catlas_ABC_merge.py'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##########################################################################################
+# Filter genes based on the proportion of individuals expressed in each cell type
+##########################################################################################
+rule yazar_rm_rareINDnCT_qcgene:
+    # also select gene expressed in all cts
+    input:
+        ctp = 'data/Yazar2022Science/ctp.gz',
+        ctnu = 'data/Yazar2022Science/ctnu.gz',
+        n = 'data/Yazar2022Science/n.gz',
+    output:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/P.qcgene{{gene_prop}}.final.gz',
+        n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/n.qcgene{{gene_prop}}.final.gz',
+    resources:
+        partition = 'tier2q',
+        mem_mb = '20G',
+    script: '../bin/yazar/rm_rareINDnCT.genefilter.py'
+
+
+use rule yazar_rm_missingIND as yazar_rm_missingIND_qcgene with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/P.qcgene{{gene_prop}}.final.gz',
+        n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/mvn/n.qcgene{{gene_prop}}.final.gz',
+    output:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.rmid.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.qcgene{{gene_prop}}.final.gz',
+        n = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/n.qcgene{{gene_prop}}.final.gz',
+
+
+use rule yazar_std_op as yazar_std_op_qcgene with:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.rmid.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.rmid.gz',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.qcgene{{gene_prop}}.final.gz',
+    output:
+        op = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/op.qcgene{{gene_prop}}.std.gz',
+        nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/nu.qcgene{{gene_prop}}.std.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.std.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.std.gz',
+
+
+use rule yazar_exclude_sexchr as yazar_exclude_sexchr_qcgene with:
+    input:
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        op = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/op.qcgene{{gene_prop}}.std.gz',
+        nu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/nu.qcgene{{gene_prop}}.std.gz',
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.std.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.std.gz',
+    output:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.qcgene{{gene_prop}}.final.gz',
+        nu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/nu.qcgene{{gene_prop}}.final.gz',
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.final.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.final.gz',
+
+
+use rule yazar_op_pca as yazar_op_pca_qcgene with:
+    input:
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.qcgene{{gene_prop}}.final.gz',
+    output:
+        evec = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/evec.qcgene{{gene_prop}}.gz',
+        eval = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/eval.qcgene{{gene_prop}}.gz',
+        pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.qcgene{{gene_prop}}.gz',
+        png = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.qcgene{{gene_prop}}.pca.png',
+
+
+use rule yazar_he_kinship as yazar_he_kinship_qcgene with:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.qcgene{{gene_prop}}.chr{{chr}}.npy',
+
+
+use rule yazar_HE_split as yazar_HE_split_qcgene with:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.qcgene{{gene_prop}}.final.gz',
+        ctnu = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctnu.qcgene{{gene_prop}}.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+    output:
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch{i}.gz'
+                for i in range(yazar_reml_batches)],
+        ctnu = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctnu.qcgene{{gene_prop}}.batch{i}.gz'
+                for i in range(yazar_reml_batches)],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch.txt',
+
+
+batch1, batch2, batch3, batch4 = np.array_split(np.arange(yazar_reml_batches), 4)
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_qcgene_part1 with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.qcgene{{gene_prop}}.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch{i}.gz'
+                for i in batch1],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.qcgene{{gene_prop}}.batch{i}.npy')
+                    for i in batch1],
+
+
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_qcgene_part2 with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.qcgene{{gene_prop}}.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch{i}.gz'
+                for i in batch2],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.qcgene{{gene_prop}}.batch{i}.npy')
+                    for i in batch2],
+
+
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_qcgene_part3 with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.qcgene{{gene_prop}}.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch{i}.gz'
+                for i in batch3],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.qcgene{{gene_prop}}.batch{i}.npy')
+                    for i in batch3],
+
+
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_qcgene_part4 with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/kinship.qcgene{{gene_prop}}.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch{i}.gz'
+                for i in batch4],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.qcgene{{gene_prop}}.batch{i}.npy')
+                    for i in batch4],
+
+
+use rule yazar_HE_free as yazar_HE_free_jk_qcgene with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.qcgene{{gene_prop}}.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctnu.qcgene{{gene_prop}}.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.qcgene{{gene_prop}}.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.qcgene{{gene_prop}}.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.qcgene{{gene_prop}}.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.qcgene{{gene_prop}}.free.batch{{i}}.jk.npy',
+    params:
+        jk = True,
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        partition = 'tier2q',
+        mem_mb = '16G',
+
+
+use rule yazar_HE_free_merge as yazar_HE_free_jk_merge_qcgene with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.qcgene{{gene_prop}}.free.batch{i}.jk.npy'
+            for i in range(yazar_reml_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.qcgene{{gene_prop}}.free.jk.npy',
+
+
+use rule yazar_HE_togz as yazar_HE_free_jk_togz_qcgene with:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.qcgene{{gene_prop}}.free.jk.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.qcgene{{gene_prop}}.final.gz',
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.qcgene{{gene_prop}}.free.jk.csv',
+
+
+rule yazar_qcgene_all:
+    input:
+        out = expand('analysis/yazar/{params}/he.qcgene{gene_prop}.free.jk.npy',
+                        params=yazar_paramspace.instance_patterns, 
+                        gene_prop=['0.05', '0.2']),
+
+
+
+
+
+
+
+
+#######################################################################################
+# LDSC
+#######################################################################################
+gwass = config['yazar']['gwas']
+neg_traits = ['Height', 'CAD', 'SCZ'] 
+pos_traits = ['UC', 'RA', 'PBC', 'MS', 'Crohns', 'Celiac', 'Lupus']
+traits = neg_traits + pos_traits
+
+
+use rule yazar_gcta_greml_op as yazar_gcta_greml_op_qcgene with:
+    input:
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.qcgene{{gene_prop}}.final.gz',
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.qcgene{{gene_prop}}.final.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta/kinship.batch{{i}}.txt',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.qcgene{{gene_prop}}.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta_qcgene{{gene_prop}}/op.greml.batch{{i}}',
+    params:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta_qcgene{{gene_prop}}/rep/op.hsq',
+        snps = 5, # threshold of snp number per gene
+
+
+use rule yazar_gcta_greml_op_merge as yazar_gcta_greml_op_merge_qcgene with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/gcta_qcgene{{gene_prop}}/op.greml.batch{i}'
+                for i in range(yazar_he_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta_qcgene{{gene_prop}}/op.greml',
+
+
+# LDSC
+use rule yazar_ldsc_make_geneset as yazar_ldsc_make_geneset_qcgene with:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.qcgene{{gene_prop}}.free.jk.npy',
+        location = 'data/Yazar2022Science/gene_location.txt',
+        gcta = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/gcta_qcgene{{gene_prop}}/op.greml',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/all.genes.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/random.genes.txt',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/shared.genes.txt',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/var.genes.txt',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/mean.genes.txt',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/gcta.genes.txt',
+    params:
+        seed = 12356,
+        chr = config['ldsc']['mhc']['chr'],
+        start = config['ldsc']['mhc']['start'],
+        end = config['ldsc']['mhc']['end'],
+
+
+use rule yazar_ldsc_make_annot as yazar_ldsc_make_annot_qcgene with:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/all.genes.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/random.genes.txt',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/shared.genes.txt',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/var.genes.txt',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/mean.genes.txt',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/gcta.genes.txt',
+        gene_coord = 'staging/data/ldsc/genecoord.txt',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+    output:
+        tmp_all = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/all.{{chr}}.annot.tmp.gz'),
+        tmp_random = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/random.{{chr}}.annot.tmp.gz'),
+        tmp_shared = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/shared.{{chr}}.annot.tmp.gz'),
+        tmp_var = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/var.{{chr}}.annot.tmp.gz'),
+        tmp_mean = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/mean.{{chr}}.annot.tmp.gz'),
+        tmp_gcta = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.annot.tmp.gz'),
+        bim = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/{{chr}}.bim'),
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/all.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/random.{{chr}}.annot.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/shared.{{chr}}.annot.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/var.{{chr}}.annot.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/mean.{{chr}}.annot.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.annot.gz',
+
+
+use rule yazar_ldsc_compldscore as yazar_ldsc_compldscore_qcgene with:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/all.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/random.{{chr}}.annot.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/shared.{{chr}}.annot.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/var.{{chr}}.annot.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/mean.{{chr}}.annot.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.annot.gz',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+        hapmap3 = 'data/ldsc/hm3_no_MHC.list.txt',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/all.{{chr}}.l2.ldscore.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/random.{{chr}}.l2.ldscore.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/shared.{{chr}}.l2.ldscore.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/var.{{chr}}.l2.ldscore.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/mean.{{chr}}.l2.ldscore.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.l2.ldscore.gz',
+
+
+use rule yazar_ldsc_seg_make_ldcts as yazar_ldsc_seg_make_ldcts_qcgene with:
+    input:
+        shared = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/shared.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        var = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/var.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        mean = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/mean.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        gcta = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/gcta.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        control = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/all.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+    output: 
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.ldcts',
+
+
+use rule yazar_ldsc_seg_regression as yazar_ldsc_seg_regression_qcgene with:
+    input:
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.ldcts',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau  
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.{{gwas}}.cell_type_results.txt',
+
+
+use rule yazar_ldsc_seg_regression_summary as yazar_ldsc_seg_regression_summary_qcgene with:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.{gwas}.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.h2_cts.png',
+
+
+use rule yazar_ldsc_controlmean_seg_make_ldcts as yazar_ldsc_controlmean_seg_make_ldcts_qcgene with:
+    input:
+        shared = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/shared.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        var = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/var.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        mean = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/mean.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        gcta = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/gcta.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        control = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/all.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+    output: 
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.controlmean.ldcts',
+
+
+use rule yazar_ldsc_seg_regression as yazar_ldsc_controlmean_seg_regression_qcgene with:
+    input:
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.controlmean.ldcts',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau  
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.{{gwas}}.controlmean.cell_type_results.txt',
+
+
+use rule yazar_ldsc_seg_regression_summary as yazar_ldsc_controlmean_seg_regression_summary_qcgene with:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.{gwas}.controlmean.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/ldsc_qcgene{{gene_prop}}/top_{{ngene}}/window_{{window}}/he.h2_cts.controlmean.png',
+
+
+rule yazar_ldsc_qcgene_all:
+    input:
+        h2_cts = expand('results/yazar/{params}/ldsc_qcgene{gene_prop}/top_{ngene}/window_{window}/he.h2_cts.png',
+                        params=yazar_paramspace.instance_patterns, 
+                        gene_prop=[0.2],
+                        ngene = [0, 200],
+                        window=[500000]),
+                        # gene_prop=[0.05, 0.2],
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##########################################################################################
+# CIGMA window size sensitivity analysis
+##########################################################################################
+rule yazar_he_kinship_cis_window:
+    input:
+        ctp = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/ctp.final.gz',
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = temp(f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/kinship.chr{{chr}}.npy'),
+    resources:
+        partition = lambda wildcards: 'tier2q' if wildcards.chr != '1' else 'tier3q',
+        mem_mb = lambda wildcards: '20G' if wildcards.chr != '1' else '80G',
+    shell: 
+        '''
+        # load plink 1.9
+        {config[plink_load]}
+
+        python3 workflow/bin/yazar/kinship.npy.py {input.genes} {input.ctp} {wildcards.r} {input.bed} {wildcards.chr} \
+                {output.kinship} 
+        '''
+
+
+batch1, batch2, batch3, batch4 = np.array_split(np.arange(yazar_reml_batches), 4)
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_part1_cis_window with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/kinship.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch1],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/reml/kinship.batch{i}.npy')
+                    for i in batch1],
+
+
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_part2_cis_window with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/kinship.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch2],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/reml/kinship.batch{i}.npy')
+                    for i in batch2],
+
+
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_part3_cis_window with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/kinship.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch3],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/reml/kinship.batch{i}.npy')
+                    for i in batch3],
+
+
+use rule yazar_he_kinship_split as yazar_reml_kinship_split_part4_cis_window with:
+    input:
+        kinship = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/kinship.chr{chr}.npy'
+                    for chr in chrs],
+        ctp = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{i}.gz'
+                for i in batch4],
+        batch = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch.txt',
+    output:
+        kinship = [temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/reml/kinship.batch{i}.npy')
+                    for i in batch4],
+
+
+use rule yazar_HE_free as yazar_HE_free_jk_cis_window with:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/reml/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/he.free.batch{{i}}.jk.npy',
+    params:
+        jk = False, 
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        partition = 'tier2q',
+        mem_mb = '16G',
+
+
+use rule yazar_HE_free_merge as yazar_HE_free_jk_merge_cis_window with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/he.free.batch{i}.jk.npy'
+            for i in range(yazar_reml_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/he.free.jk.npy',
+
+
+use rule yazar_HE_togz as yazar_HE_free_jk_togz_cis_window with:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/he.free.jk.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/he.free.jk.csv',
+
+
+#######################################################################################
+# LDSC
+#######################################################################################
+# gcta
+rule yazar_gcta_grm_cis_window:
+    input:
+        genes = 'data/Yazar2022Science/gene_location.txt',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        bed = 'analysis/yazar/data/geno/chr{chr}.bed',
+    output:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/kinship.chr{{chr}}.txt',
+    params:
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/kinship/gene.grm.bin',  # file size: each gene has ~1.7 MB bin and ~1.7 MB N.bin
+    resources:
+        mem_mb = '20G',
+    shell:
+        '''
+        # load plink 1.9 and gcta
+        module load gcc/11.3.0 atlas/3.10.3 lapack/3.11.0 plink/1.9 gcta/1.94.1
+
+        mkdir -p $(dirname {params.kinship})
+        python3 workflow/bin/yazar/kinship.py \
+                {input.genes} {input.P} {wildcards.r} \
+                {input.bed} {wildcards.chr} \
+                {params.kinship} {output.kinship}
+        '''
+
+
+use rule yazar_gcta_split_kinship as yazar_gcta_split_kinship_cis_window with:
+    input:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/kinship.chr{chr}.txt'
+                for chr in range(1,23)],
+    output:
+        kinship = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/kinship.batch{i}.txt'
+                for i in range(yazar_he_batches)],
+
+
+use rule yazar_gcta_greml_op as yazar_gcta_greml_op_cis_window with:
+    input:
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/op.final.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/kinship.batch{{i}}.txt',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/op.greml.batch{{i}}',
+    params:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/rep/op.hsq',
+        snps = 5, # threshold of snp number per gene
+
+
+use rule yazar_gcta_greml_op_merge as yazar_gcta_greml_op_merge_cis_window with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/op.greml.batch{i}'
+                for i in range(yazar_he_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/op.greml',
+
+
+# LDSC
+use rule yazar_ldsc_make_geneset as yazar_ldsc_make_geneset_cis_window with:
+    input:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/he.free.jk.npy',
+        location = 'data/Yazar2022Science/gene_location.txt',
+        gcta = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/gcta/op.greml',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/all.genes.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/random.genes.txt',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/shared.genes.txt',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/var.genes.txt',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/mean.genes.txt',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/gcta.genes.txt',
+    params:
+        seed = 12398,
+        chr = config['ldsc']['mhc']['chr'],
+        start = config['ldsc']['mhc']['start'],
+        end = config['ldsc']['mhc']['end'],
+
+
+use rule yazar_ldsc_make_annot as yazar_ldsc_make_annot_cis_window with:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/all.genes.txt',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/random.genes.txt',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/shared.genes.txt',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/var.genes.txt',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/mean.genes.txt',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/gcta.genes.txt',
+        gene_coord = 'staging/data/ldsc/genecoord.txt',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+    output:
+        tmp_all = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/all.{{chr}}.annot.tmp.gz'),
+        tmp_random = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/random.{{chr}}.annot.tmp.gz'),
+        tmp_shared = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/shared.{{chr}}.annot.tmp.gz'),
+        tmp_var = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/var.{{chr}}.annot.tmp.gz'),
+        tmp_mean = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/mean.{{chr}}.annot.tmp.gz'),
+        tmp_gcta = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.annot.tmp.gz'),
+        bim = temp(f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/{{chr}}.bim'),
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/all.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/random.{{chr}}.annot.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/shared.{{chr}}.annot.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/var.{{chr}}.annot.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/mean.{{chr}}.annot.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.annot.gz',
+
+
+use rule yazar_ldsc_compldscore as yazar_ldsc_compldscore_cis_window with:
+    input:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/all.{{chr}}.annot.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/random.{{chr}}.annot.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/shared.{{chr}}.annot.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/var.{{chr}}.annot.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/mean.{{chr}}.annot.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.annot.gz',
+        bim = 'analysis/ldsc/1000G_EUR_Phase3_plink/1000G.EUR.QC.noMHC.{chr}.bim',
+        hapmap3 = 'data/ldsc/hm3_no_MHC.list.txt',
+    output:
+        all = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/all.{{chr}}.l2.ldscore.gz',
+        random = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/random.{{chr}}.l2.ldscore.gz',
+        shared = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/shared.{{chr}}.l2.ldscore.gz',
+        var = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/var.{{chr}}.l2.ldscore.gz',
+        mean = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/mean.{{chr}}.l2.ldscore.gz',
+        gcta = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/gcta.{{chr}}.l2.ldscore.gz',
+
+
+use rule yazar_ldsc_seg_make_ldcts as yazar_ldsc_seg_make_ldcts_cis_window with:
+    input:
+        shared = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/shared.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        var = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/var.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        mean = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/mean.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        gcta = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/gcta.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        control = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/all.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+    output: 
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.ldcts',
+
+
+use rule yazar_ldsc_seg_regression as yazar_ldsc_seg_regression_cis_window with:
+    input:
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.ldcts',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.{{gwas}}.cell_type_results.txt',
+
+
+use rule yazar_ldsc_seg_regression_summary as yazar_ldsc_seg_regression_summary_cis_window with:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.{gwas}.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.h2_cts.png',
+
+
+use rule yazar_ldsc_controlmean_seg_make_ldcts as yazar_ldsc_controlmean_seg_make_ldcts_cis_window with:
+    input:
+        shared = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/shared.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        var = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/var.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        mean = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/mean.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        gcta = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/gcta.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+        control = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/all.{chr}.l2.ldscore.gz'
+                    for chr in chrs],
+    output: 
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.controlmean.ldcts',
+
+
+use rule yazar_ldsc_seg_regression as yazar_ldsc_controlmean_seg_regression_cis_window with:
+    input:
+        gwas = 'staging/data/ldsc/{gwas}.sumstats.gz',
+        ldcts = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.controlmean.ldcts',
+        ref_ld = expand('data/ldsc/baseline_v1.2/baseline.{chr}.l2.ldscore.gz', chr=chrs),  # readme_baseline_versions: use baselineLD v2.2 for estimating heritability enrichment; baseline v1.2 for identifying critical tissues/cell-types via P-value of tau
+        weight = expand('data/ldsc/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.{chr}.l2.ldscore.gz', chr=chrs),
+    output:
+        out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.{{gwas}}.controlmean.cell_type_results.txt',
+
+
+use rule yazar_ldsc_seg_regression_summary as yazar_ldsc_controlmean_seg_regression_summary_cis_window with:
+    input:
+        stacked = [f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.{gwas}.controlmean.cell_type_results.txt'
+                    for gwas in traits],
+    output:
+        png = f'results/yazar/{yazar_paramspace.wildcard_pattern}/cis_window_{{r}}/ldsc/top_{{ngene}}/window_{{window}}/he.h2_cts.controlmean.png',
+
+
+rule yazar_cis_window_all:
+    input:
+        out = expand('analysis/yazar/{params}/cis_window_{r}/he.free.jk.npy',
+                        params=yazar_paramspace.instance_patterns, 
+                        r = [200000, 400000, 600000, 800000, 900000, 1000000]),
+
+rule yazar_ldsc_cis_window_all:
+    input:
+        h2_cts = expand('results/yazar/{params}/cis_window_{r}/ldsc/top_{ngene}/window_{window}/he.h2_cts.png',
+                        params=yazar_paramspace.instance_patterns, 
+                        r = [5000, 20000, 50000, 100000],
+                        ngene = [200],
+                        window=[500000]),
 
 

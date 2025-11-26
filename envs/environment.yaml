@@ -13,11 +13,14 @@ dependencies:
     - seaborn
     - rpy2
     - scanpy
+    - bedtools
+    - pybedtools
     - biopython
     - r:r
     - r-msm
+    - r-reticulate
     - rdata
     - bioconductor-biomart
     - pip
-    - pip:
-        - cigma
+    #- pip:
+    #    - cigma
