@@ -71,7 +71,6 @@ rule sim_generatedata:
     script: '../bin/sim/generatedata.add_neutral.py'
 
 
-
 rule sim_HE:
     input:
         data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.batch{{i}}.npy',
@@ -92,6 +91,8 @@ rule sim_mergeBatches_HE:
                 for i in range(config['sim']['batch_no'])],
     output:
         out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.he.npy',
+    resources:
+        partition = config['partition1'],
     script: '../bin/mergeBatches.py'
 
 
@@ -151,6 +152,116 @@ rule sim_agg_he_out:
 
 
 
+# TODO: tmp LD SNPs
+rule sim_generatedata_ld:
+    input:
+        beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
+        V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
+        W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
+    output:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim2.batch{{i}}.npy',
+    params:
+        batches = sim_batches,
+        beta = (0.5, 0.5), # beta distribution for allele frequency
+        maf = 0.05,
+        seed = 273672,
+    resources:
+        partition = config['partition1'],
+        mem_mb = '1G',
+    script: '../bin/sim/generatedata.add_neutral.ld.py'
+
+
+rule sim_HE_ld:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim2.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/he.batch{{i}}.npy',
+    resources:
+        partition = lambda wildcards: config['partition1'] if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else config['partition2'],
+        mem_mb = lambda wildcards: '6G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else '20G' if len(wildcards.a.split('_')) <=4 else '30G',
+    script: '../bin/sim/he.tmp.py'
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_HE_ld with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/he.batch{i}.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/out2.he.npy',
+
+
+
+##########################################
+# REML
+##########################################
+rule sim_REML:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{{i}}.npy',
+    resources:
+        time = '100:00:00',
+        mem_mb = '5G',
+    priority: 1
+    script: '../bin/sim/reml.py'
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_REML with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{i}.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.npy',
+
+
+def sim_agg_reml_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/L_{{L}}_nL_{{nL}}/out.reml.npy', params=subspace.instance_patterns)
+
+
+rule sim_agg_reml_out:
+    input:
+        out = sim_agg_reml_out_subspace,
+    output:
+        out = 'analysis/sim/{model}/L_{L}_nL_{nL}/AGG{arg}.reml.npy',
+    params:
+        subspace = lambda wildcards: get_subspace(wildcards.arg,
+                sim_params.loc[sim_params['model']==wildcards.model]).iloc[:,:],
+    run:
+        args = np.array(params.subspace[wildcards.arg])
+        data = {}
+        for arg, out in zip(args, input.out):
+            data[arg] = np.load(out, allow_pickle=True).item()
+        np.save(output.out, data)
+
+
+use rule sim_REML as sim_REML_noCholesky with:
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.noCholesky.batch{{i}}.npy',
+    params:
+        chol = False,
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_REML_noCholesky with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.noCholesky.batch{i}.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.noCholesky.npy',
+
+
+def sim_agg_reml_noChol_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/L_{{L}}_nL_{{nL}}/out.reml.noCholesky.npy', params=subspace.instance_patterns)
+
+
+use rule sim_agg_reml_out as sim_agg_reml_noChol_out with:
+    input:
+        out = sim_agg_reml_noChol_out_subspace,
+    output:
+        out = 'analysis/sim/{model}/L_{L}_nL_{nL}/AGG{arg}.reml.noCholesky.npy',
+
+
 
 ############################
 # 1.2 real genotype 
@@ -190,7 +301,7 @@ rule sim_realgeno_pick_genes:
     params:
         n_genes = int(config['sim']['replicates']),
         seed = 12345,
-        nsnp_cutoff = 100,
+        nsnp_cutoff = 20,
     resources:
         partition = 'tier3q',
         mem_mb = '120G',
@@ -199,7 +310,7 @@ rule sim_realgeno_pick_genes:
         for gene_f in input.genes:
             print(gene_f, flush=True)
             gene_data = np.load(gene_f, allow_pickle=True).item()
-            # exclude genes with variants less than 100
+            # exclude genes with variants less than 20
             genes = genes + [k for k, v in gene_data.items() if v['nsnps'] >= params.nsnp_cutoff]
 
         genes = list(set(genes))
@@ -224,18 +335,36 @@ rule sim_realgeno_generatedata:
         beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
         V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
         W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
-        genes = f'analysis/sim/simulated_genes.npy',
+        genes = expand('staging/sim/genes.chr{chr}.genotype.npy', chr=range(1,23)),
     output:
-        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{{i}}.npy',
+        data = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{i}.npy'
+                for i in range(config['sim']['batch_no'])],
     params:
-        batches = sim_batches,
-        # beta = (0.5, 0.5), # beta distribution for allele frequency
-        # maf = 0.05,
-        seed = 273672,
+        seed = 2713672,
     resources:
-        partition = config['partition2'],
-        mem_mb = '35G',
-    script: '../bin/sim/generatedata.real_genotype.py'
+        partition = config['partition3'],
+        mem_mb = '120G',
+    script: '../bin/sim/generatedata2.real_genotype.py'
+
+
+# rule sim_realgeno_generatedata:
+#     input:
+#         beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
+#         V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
+#         W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
+#         genes = f'analysis/sim/simulated_genes.npy',
+#     output:
+#         data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{{i}}.npy',
+#     params:
+#         batches = sim_batches,
+#         # beta = (0.5, 0.5), # beta distribution for allele frequency
+#         # maf = 0.05,
+#         seed = 2713672,
+#     resources:
+#         partition = config['partition3'],
+#         mem_mb = '35G',
+#     priority: 1
+#     script: '../bin/sim/generatedata.real_genotype.py'
 
 
 use rule sim_HE as sim_realgeno_HE with:
@@ -243,6 +372,12 @@ use rule sim_HE as sim_realgeno_HE with:
         data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{{i}}.npy',
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/he.batch{{i}}.npy',
+    params:
+        free_jk = False,
+        full = False,
+    resources:
+        partition = config['partition1'],
+        mem_mb = '6G',
 
 
 use rule sim_mergeBatches_HE as sim_realgeno_mergeBatches_HE with:
@@ -439,6 +574,30 @@ rule sim_agg_he_noisy_nu_out_alpha:
         np.save(output.out, data)
 
 
+# reml
+use rule sim_REML as sim_REML_noisy_nu with:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.noise_{{alpha}}.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.noise_{{alpha}}.batch{{i}}.npy',
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_REML_noisy_nu with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.noise_{{alpha}}.batch{i}.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.noise_{{alpha}}.npy',
+
+
+use rule sim_agg_he_noisy_nu_out_alpha as sim_agg_reml_noisy_nu_out_alpha with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.noise_{alpha}.npy'
+                for alpha in config['sim']['noise_alpha']]
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.noisy_nu.npy',
+
+
 def sim_agg_he_noisy_nu_out(wildcards):
     subspace1 = get_subspace('ss', sim_params.loc[sim_params['model']=='hom'].head(1))
     subspace2 = get_subspace('ss', sim_params.loc[sim_params['model']=='free'].head(1))
@@ -552,6 +711,25 @@ use rule sim_mergeBatches_HE as sim_gcta_greml_ctp_merge with:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/greml.npy',
 
 
+# TODO: temp
+use rule sim_gcta_greml_ctp as sim_gcta_greml_ctp_ld with:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/greml.batch{{i}}.npy',
+    resources:
+        mem_mb = lambda wildcards: '2G' if int(wildcards.ss) <= 2000 else '4G',
+        partition = config['partition1'],
+
+
+use rule sim_mergeBatches_HE as sim_gcta_greml_ctp_ld_merge with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/greml.batch{i}.npy'
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/greml.npy',
+
+
 def sim_agg_greml_out_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('staging/sim/{{model}}/{params}/L_{{L}}_nL_{{nL}}/greml.npy', params=subspace.instance_patterns)
@@ -583,6 +761,40 @@ rule sim_gcta_all:
         flag = touch('analysis/sim/{model}/L_{L}_nL_{nL}/AGG{arg}.gcta.flag'),
 
 
+rule sim_gcta_greml_aireml_ctp:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/greml.aireml.batch{{i}}.npy',
+    resources:
+        mem_mb = lambda wildcards: '2G' if int(wildcards.ss) <= 2000 else '4G',
+    priority: 1
+    shell:
+        '''
+        module load gcc/11.3.0 gcta/1.94.1
+        python3 workflow/bin/sim/gcta_greml_aireml_ctp.py \
+                {input.data} {output.out} \
+        '''
+
+
+use rule sim_mergeBatches_HE as sim_gcta_greml_aireml_ctp_merge with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/greml.aireml.batch{i}.npy'
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/greml.aireml.npy',
+
+
+def sim_agg_greml_aireml_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('staging/sim/{{model}}/{params}/L_{{L}}_nL_{{nL}}/greml.aireml.npy', params=subspace.instance_patterns)
+
+
+use rule sim_gcta_greml_ctp_agg as sim_gcta_greml_aireml_ctp_agg with:
+    input:
+        out = sim_agg_greml_aireml_out_subspace,
+    output:
+        out = 'analysis/sim/{model}/L_{L}_nL_{nL}/AGG{arg}.greml.aireml.npy',
 
 
 
@@ -688,6 +900,24 @@ use rule sim_mergeBatches_HE as sim_bolt_ctp_merge with:
                 for i in range(config['sim']['batch_no'])],
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/bolt.npy',
+
+# TODO: temp
+use rule sim_bolt_ctp as sim_bolt_ctp_ld with:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/bolt.batch{{i}}.npy',
+    resources:
+        mem_mb = lambda wildcards: '2G' if int(wildcards.ss) <= 2000 else '4G',
+        partition = config['partition1'],
+
+
+use rule sim_mergeBatches_HE as sim_bolt_ctp_ld_merge with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/bolt.batch{i}.npy'
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/bolt.npy',
 
 
 def sim_agg_bolt_out_subspace(wildcards):
@@ -860,10 +1090,39 @@ rule sim_nongaussian_all:
                     L=[config['sim']['L']] * 4, nL=[config['sim']['nL']] * 4),
 
 
+# reml
+use rule sim_REML as sim_nongaussian_REML with:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/{{dist_g}}_g.{{dist_v}}_e.sim.batch{{i}}.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/{{dist_g}}_g.{{dist_v}}_e.reml.batch{{i}}.npy',
 
 
+use rule sim_mergeBatches_HE as sim_nongaussian_mergeBatches_REML with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/{{dist_g}}_g.{{dist_v}}_e.reml.batch{i}.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/{{dist_g}}_g.{{dist_v}}_e.out.reml.npy',
 
 
+# def sim_nongaussian_agg_reml_out_subspace(wildcards):
+#     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+#     return expand('analysis/sim/{{model}}/{params}/L_{{L}}_nL_{{nL}}/{{dist_g}}_g.{{dist_v}}_e.out.reml.npy', params=subspace.instance_patterns)
+
+
+# use rule sim_agg_he_out as sim_nongaussian_agg_reml_out with:
+#     input:
+#         out = sim_nongaussian_agg_reml_out_subspace,
+#     output:
+#         out = 'analysis/sim/{model}/L_{L}_nL_{nL}/{dist_g}_g.{dist_v}_e/AGG{arg}.reml.npy',
+
+
+# rule sim_nongaussian_reml_all:
+#     input:
+#         out = expand('analysis/sim/free/L_{L}_nL_{nL}/{dist_g}_g.{dist_v}_e/AGGss.reml.npy',
+#                     zip, dist_g=['gaussian', 'spikeslab', 'spikeslab', 't2'], dist_v=['spikeslab', 'gaussian', 'spikeslab', 't2'],
+#                     L=[config['sim']['L']] * 4, nL=[config['sim']['nL']] * 4),
 
 
 
@@ -1118,13 +1377,5 @@ rule sim_all:
                     zip, dist_g=['gaussian', 'spikeslab', 'spikeslab', 't2'], dist_v=['spikeslab', 'gaussian', 'spikeslab', 't2'],
                     L=[config['sim']['L']] * 4, nL=[config['sim']['nL']] * 4),
 
-
-
-rule sim_all_part1:
-    input:
-        full = expand('analysis/sim/full2/L_{L}_nL_{nL}/AGGV_tril.he.noJK.npy',
-                     L=config['sim']['L'],
-                     nL=config['sim']['nL']),
-        full_par = 'analysis/sim/full2/AGGV_tril.true_V.npy',
 
 

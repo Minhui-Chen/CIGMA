@@ -69,6 +69,9 @@ wildcard_constraints: dist_g = '\w+'
 wildcard_constraints: dist_v = '\w+'
 wildcard_constraints: gene_prop = '[\d\.]+'
 wildcard_constraints: feature = '\w+'
+wildcard_constraints: cc = '\w+'
+wildcard_constraints: gene = '\w+'
+wildcard_constraints: ld='[^/]+'
 
 
 
@@ -78,6 +81,7 @@ wildcard_constraints: feature = '\w+'
 include: 'rules/common.smk'
 include: 'rules/sim.smk'
 include: 'rules/yazar.smk'
+include: 'rules/yazar.add.smk'
 include: 'rules/yazar_sim.smk'
 include: 'rules/perez.smk'
 # if os.path.isfile('dev/yazar.smk'):

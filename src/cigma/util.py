@@ -68,6 +68,10 @@ def read_out(cigma_out: dict, columns: list, cts: Optional[list] = None) -> pd.D
                 X = tmp[key]
                 for i in range(X.shape[1]):
                     out[f'{column}_{cts[i]}'] = X[:, i]
+            elif key in ['var_V', 'var_W']:
+                X = np.diagonal(tmp[key], axis1=1, axis2=2)
+                for i in range(X.shape[1]):
+                    out[f'{column}_{cts[i]}'] = X[:, i]
             else:
                 if key not in tmp:
                     raise KeyError(f"Key '{key}' not found in cigma_out for column '{column}'")

@@ -36,8 +36,8 @@ def main():
 
     # free
     if 'free' in out.keys():
-        data['free_cis_hom_g2'] = out['free']['hom_g2']
-        data['free_hom_e2'] = out['free']['hom_e2']
+        data['hom_g2'] = out['free']['hom_g2']
+        data['hom_e2'] = out['free']['hom_e2']
         # batch = out['free']['r2']['batch']
         # if len(batch.shape) > 1:
         #     data[[f'free_batch_{ct}' for ct in cts]] = batch
@@ -47,40 +47,40 @@ def main():
         # data[[f'ctnu_{ct}' for ct in cts]] = out['free']['ctnu']
         cis_V = np.diagonal(out['free']['V'], axis1=1, axis2=2)
         W = np.diagonal(out['free']['W'], axis1=1, axis2=2)
-        data[[f'free_cis_V_{ct}' for ct in cts]] = cis_V
-        data[[f'free_W_{ct}' for ct in cts]] = W
-        # data[[f'free_h2_{ct}' for ct in cts]] = out['free']['cis_h2']
-        data[[f'free_beta_{ct}' for ct in cts]] = out['free']['ct_beta']
+        data[[f'V_{ct}' for ct in cts]] = cis_V
+        data[[f'W_{ct}' for ct in cts]] = W
+        # data[[f'h2_{ct}' for ct in cts]] = out['free']['cis_h2']
+        # data[[f'beta_{ct}' for ct in cts]] = out['free']['ct_beta']
+        data['shared_h2'] = out['free']['shared_h2']
+        data['specific_h2'] = out['free']['specific_h2']
+        data['specificity'] = out['free']['specificity']
 
         # trans
         if 'trans_hom_g2' in out['free'].keys():
-            data['free_trans_hom_g2'] = out['free']['trans_hom_g2']
+            data['trans_hom_g2'] = out['free']['trans_hom_g2']
             trans_V = np.diagonal(out['free']['trans_V'], axis1=1, axis2=2)
-            data[[f'free_trans_V_{ct}' for ct in cts]] = trans_V
-            # data[[f'free_trans_h2_{ct}' for ct in cts]] = free['free']['trans_h2']
+            data[[f'trans_V_{ct}' for ct in cts]] = trans_V
+            # data[[f'trans_h2_{ct}' for ct in cts]] = free['free']['trans_h2']
         
         # p
         if 'p' in out.keys():
             # se
             if 'var_hom_g2' in out['p']['free'].keys():
-                data['free_se_cis_hom_g2'] = np.sqrt(out['p']['free']['var_hom_g2'])
+                data['se:hom_g2'] = np.sqrt(out['p']['free']['var_hom_g2'])
             if 'var_hom_e2' in out['p']['free'].keys():
-                data['free_se_hom_e2'] = np.sqrt(out['p']['free']['var_hom_e2'])
+                data['se:hom_e2'] = np.sqrt(out['p']['free']['var_hom_e2'])
             if 'var_V' in out['p']['free'].keys():
                 var_cis_V = np.diagonal(out['p']['free']['var_V'], axis1=1, axis2=2)
-                data[[f'free_se_cis_V_{ct}' for ct in cts]] = np.sqrt(var_cis_V)
+                data[[f'se:V_{ct}' for ct in cts]] = np.sqrt(var_cis_V)
             if 'var_W' in out['p']['free'].keys():
                 var_W = np.diagonal(out['p']['free']['var_W'], axis1=1, axis2=2)
-                data[[f'free_se_W_{ct}' for ct in cts]] = np.sqrt(var_W)
+                data[[f'se:W_{ct}' for ct in cts]] = np.sqrt(var_W)
             # p
-            data['free_p_cis_hom_g2'] = out['p']['free']['hom_g2']
-            data['free_p_hom_e2'] = out['p']['free']['hom_e2']
-            data['free_p_cis_V'] = out['p']['free']['V']
-            data['free_p_W'] = out['p']['free']['W']
-            data['free_p_cis_hom_g2_invvar'] = out['p']['free']['inv_var_hom_g2']
-            data['free_p_hom_e2_invvar'] = out['p']['free']['inv_var_hom_e2']
-            data['free_p_cis_V_invvar'] = out['p']['free']['inv_var_V']
-            data['free_p_W_invvar'] = out['p']['free']['inv_var_W']
+            data['p:hom_g2'] = out['p']['free']['hom_g2']
+            data['p:hom_e2'] = out['p']['free']['hom_e2']
+            data['p:V'] = out['p']['free']['V']
+            data['p:W'] = out['p']['free']['W']
+
 
     # full
     if 'full' in out.keys():

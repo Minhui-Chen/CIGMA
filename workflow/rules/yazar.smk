@@ -622,7 +622,7 @@ rule yazar_he_kinship_split:
     params:
         chrs = chrs,
     resources:
-        partition = 'tier2q',
+        partition = config['partition3'], # TODO
         mem_mb = '20G',
     script: '../bin/yazar/kinship.split.py'
 
@@ -670,6 +670,37 @@ rule yazar_HE_togz:
     output:
         out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.csv',
     script: '../bin/yazar/he.togz.py'
+
+
+# runtime
+rule yazar_HE_free_runtime:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{{i}}.runtime.npy',
+    params:
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    resources:
+        partition = config['partition2'],
+        mem_mb = '16G',
+    script: '../bin/yazar/he.runtime.py' 
+
+
+use rule yazar_HE_free_merge as yazar_HE_free_runtime_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{i}.runtime.npy'
+            for i in range(yazar_he_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.runtime.npy',
+
 
 
 
@@ -773,6 +804,32 @@ use rule yazar_HE_togz as yazar_HE_free_jk_togz with:
     output:
         out = f'results/yazar/{yazar_paramspace.wildcard_pattern}/he.free.jk.csv',
 
+# reml
+rule yazar_reml:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.batch{{i}}.npy',
+    params:
+        snps = 5, # threshold of snp number per gene
+    resources:
+        partition = config['partition2'],
+        mem_mb = '16G',
+    script: '../bin/yazar/reml.py' 
+
+
+use rule yazar_HE_free_merge as yazar_reml_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.batch{i}.npy'
+            for i in range(yazar_reml_batches)],
+    output:
+        out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/reml.npy',
 
 
 

@@ -19,6 +19,9 @@ dependencies:
     - r:r
     - r-msm
     - r-reticulate
+    - r-optparse
+    - r-numderiv
+    - r-matrix
     - rdata
     - bioconductor-biomart
     - pip

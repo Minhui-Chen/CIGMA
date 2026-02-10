@@ -77,22 +77,22 @@ def main():
 
     data = {}
     for i in batch:
-        rng = np.random.default_rng(snakemake.params.seed + i)
+        rng = np.random.default_rng(snakemake.params.seed + i + ss + L)
         gene_name = gene_names[i]
-        data[i] = {}
+        data[gene_name] = {}
 
         # simulate genotypes
         G = Gs[gene_name]
-        assert G.shape[0] > ss
+        assert G.shape[0] > ss, f"{G.shape[0]} samples in genotype but {ss} needed"
         # random sample individuals
         perm = rng.permutation(G.shape[0])[:ss]
         G = G[perm, :]
         # remove monomorphic SNPs
         stds = np.std(G, axis=0)
         G = G[:, stds > 0]
-        assert G.shape[1] > L
+        assert G.shape[1] > L, f"{G.shape[1]} SNPs in genotype but {L} needed"
 
-        data[i]['rawG'] = G
+        data[gene_name]['rawG'] = G
 
         ## standardize
         # if np.any(np.std(G, axis=0) == 0):
@@ -101,11 +101,11 @@ def main():
         G = (G - 2 * maf) / np.sqrt(2 * maf * (1 - maf))
 
         ## save
-        data[i]['G'] = G
+        data[gene_name]['G'] = G
 
         # calculate K
         K = G @ G.T / G.shape[1]
-        data[i]['K'] = K
+        data[gene_name]['K'] = K
 
         # subset causal variants
         snps = rng.permutation(G.shape[1])[:L]
@@ -143,9 +143,9 @@ def main():
         P = rng.dirichlet(alpha=a, size=ss)
         P = adjust_min_value(P, 0.05)
         assert np.allclose(P.sum(axis=1), np.ones(P.shape[0]))
-        data[i]['P'] = P
+        data[gene_name]['P'] = P
         pi = np.mean(P, axis=0)
-        data[i]['pi'] = pi
+        data[gene_name]['pi'] = pi
 
         ## estimate S
         ### demean P
@@ -153,7 +153,7 @@ def main():
         ### covariance
         s = (pd.T @ pd) / ss
         # print(bmatrix(s))
-        data[i]['s'] = s
+        data[gene_name]['s'] = s
 
         # calculate ct fixed effect
         ct_main = P @ beta
@@ -172,18 +172,18 @@ def main():
         ## since mean = 0.2 and assume var = 0.01, we can get k and theta
         if mean_nu == 0:
             nu = np.zeros(ss)
-            data[i]['nu'] = nu
+            data[gene_name]['nu'] = nu
             ctnu = np.zeros((ss, C))
-            data[i]['ctnu'] = ctnu
+            data[gene_name]['ctnu'] = ctnu
         else:
             theta = var_nu / mean_nu
             k = mean_nu / theta
             ### variance of error for each individual
             nu = rng.gamma(k, scale=theta, size=ss)
-            data[i]['nu'] = nu
+            data[gene_name]['nu'] = nu
             #### variance of error for each individual-cell type
             ctnu = nu.reshape(-1, 1) * (1 / P)
-            data[i]['ctnu'] = ctnu
+            data[gene_name]['ctnu'] = ctnu
 
         ## draw residual error from normal distribution with variance drawn above
         error = rng.normal(loc=0, scale=np.sqrt(nu))
@@ -198,16 +198,16 @@ def main():
             X, b = add_fixed(int(snakemake.wildcards.fixed), ss, rng)
             y = y + X @ b
             Y = Y + (X @ b)[:, np.newaxis]
-            data[i]['fixed'] = X
+            data[gene_name]['fixed'] = X
         
         if 'random' in snakemake.wildcards.keys():
             X, b = add_random(int(snakemake.wildcards.random), ss, rng)
             y = y + X @ b
             Y = Y + (X @ b)[:, np.newaxis]
-            data[i]['random'] = X
+            data[gene_name]['random'] = X
 
-        data[i]['y'] = y
-        data[i]['Y'] = Y
+        data[gene_name]['y'] = y
+        data[gene_name]['Y'] = Y
 
     np.save(snakemake.output.data, data)
 

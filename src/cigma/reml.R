@@ -1,9 +1,6 @@
-install.packages( setdiff(c('numDeriv','Matrix', 'optparse'), rownames(installed.packages())) )
 library(optparse)
 library(numDeriv)
 library(Matrix)
-# library(tensor)
-# library(abind)
 
 LL <- function(Y, X, K1, vs, g1, V1, e, W, K2=NULL, g2=NULL, V2=NULL,
                 r2=NULL, random_MMT=NULL){

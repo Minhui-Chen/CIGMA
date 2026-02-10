@@ -472,7 +472,7 @@ rule perez_HE_Free_meta_togz:
         out = f'analysis/perez/{perez_paramspace.wildcard_pattern}/he.free.meta.npy',
         P = f'analysis/perez/{perez_paramspace.wildcard_pattern}/European.SLE/P.final.gz',
     output:
-        out = f'results/perez/{perez_paramspace.wildcard_pattern}/he.free.meta.gz',
+        out = f'results/perez/{perez_paramspace.wildcard_pattern}/he.free.meta.csv',
     script: '../bin/perez/he.togz.py'
 
 
