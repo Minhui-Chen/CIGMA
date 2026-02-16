@@ -29,7 +29,7 @@ wildcard_constraints: i='[0-9]+'
 wildcard_constraints: k='[0-9]+'
 wildcard_constraints: rep='[0-9]+'
 wildcard_constraints: n='[0-9]+'
-wildcard_constraints: L='[0-9]+'
+wildcard_constraints: L='[0-9\.]+'
 wildcard_constraints: nL='[0-9]+'
 wildcard_constraints: gset='[a-zA-Z\d]+'
 wildcard_constraints: ngene='[0-9]+'
@@ -76,6 +76,12 @@ wildcard_constraints: ld='[^/]+'
 
 
 
+############### read parameters ################
+yazar_params = pd.read_table('yazar.params.txt', dtype="str", comment='#')
+yazar_paramspace = Paramspace(yazar_params, filename_params="*")
+
+
+
 ############### load rules ################
 
 include: 'rules/common.smk'
@@ -86,3 +92,4 @@ include: 'rules/yazar_sim.smk'
 include: 'rules/perez.smk'
 # if os.path.isfile('dev/yazar.smk'):
 #     include: 'dev/yazar.smk'
+

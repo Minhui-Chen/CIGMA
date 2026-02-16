@@ -3,10 +3,10 @@ from typing import Tuple, Optional, Union
 import re, sys
 import numpy as np, pandas as pd
 from scipy import stats, sparse
-import pkg_resources
-import rpy2.robjects as ro
-from rpy2.robjects import r, pandas2ri, numpy2ri
-from rpy2.robjects.packages import STAP
+# import pkg_resources
+# import rpy2.robjects as ro
+# from rpy2.robjects import r, pandas2ri, 
+# from rpy2.robjects.packages import STAP
 from anndata import AnnData
 import scanpy as sc
 
@@ -416,141 +416,141 @@ def pseudobulk(counts: Optional[pd.DataFrame] = None,
     return (ctp, ctnu, P, cell_counts)
 
 
-def _softimpute(data: pd.DataFrame, seed: int = None, scale: bool = True) -> pd.DataFrame:
-    '''
-    Impute missing ctp or ct-specific noise variance (ctnu)
+# def _softimpute(data: pd.DataFrame, seed: int = None, scale: bool = True) -> pd.DataFrame:
+#     '''
+#     Impute missing ctp or ct-specific noise variance (ctnu)
 
-    Parameters:
-        data:   ctp or ctnu of shape index: ind * columns: (genes, cts) (or cts when impute for one gene)
-        seed:   seed for softImpute, only needed to be replicate imputation
-        scale:  scale before imputation
-    Results:
-        imputed dataset
-    '''
-    # load softImpute r package
-    is_sourced = r("exists('my_softImpute')")[0]
-    if not is_sourced:
-        rf = pkg_resources.resource_filename(__name__, 'softImpute.R')
-        softImpute = STAP(open(rf).read(), 'softImpute')
+#     Parameters:
+#         data:   ctp or ctnu of shape index: ind * columns: (genes, cts) (or cts when impute for one gene)
+#         seed:   seed for softImpute, only needed to be replicate imputation
+#         scale:  scale before imputation
+#     Results:
+#         imputed dataset
+#     '''
+#     # load softImpute r package
+#     is_sourced = r("exists('my_softImpute')")[0]
+#     if not is_sourced:
+#         rf = pkg_resources.resource_filename(__name__, 'softImpute.R')
+#         softImpute = STAP(open(rf).read(), 'softImpute')
 
-    if seed is None:
-        seed = ro.NULL
+#     if seed is None:
+#         seed = ro.NULL
 
-    # Impute
-    pandas2ri.activate()
-    if scale:
-        out = softImpute.my_softImpute(r['as.matrix'](data), scale=ro.vectors.BoolVector([True]), seed=seed)
-    else:
-        out = softImpute.my_softImpute(r['as.matrix'](data), seed=seed)
-    out = dict(zip(out.names, list(out)))
-    out = pd.DataFrame(out['Y'], index=data.index, columns=data.columns)
-    pandas2ri.deactivate()
+#     # Impute
+#     pandas2ri.activate()
+#     if scale:
+#         out = softImpute.my_softImpute(r['as.matrix'](data), scale=ro.vectors.BoolVector([True]), seed=seed)
+#     else:
+#         out = softImpute.my_softImpute(r['as.matrix'](data), seed=seed)
+#     out = dict(zip(out.names, list(out)))
+#     out = pd.DataFrame(out['Y'], index=data.index, columns=data.columns)
+#     pandas2ri.deactivate()
 
-    return (out)
-
-
-def softimpute(data: pd.DataFrame, seed: int = None, scale: bool = True,
-               per_gene: bool = False) -> pd.DataFrame:
-    '''
-    Impute missing ctp or ct-specific noise variance (ctnu)
-
-    Parameters:
-        data:   ctp or ctnu of shape index: (ind, ct) * columns: genes
-        seed:   seed for softImpute, only needed to be replicate imputation
-        scale:  scale before imputation
-        per_gene:   perform imputation per gene
-    Results:
-        imputed dataset
-    '''
-    if not per_gene:
-        # transform to index: ind * columns: (genes: cts)
-        data = data.unstack()
-
-        # impute
-        imputed = _softimpute(data, seed, scale)
-
-        # transform back
-        imputed = imputed.stack()
-    else:
-        imputed = []
-        for i, gene in enumerate(data.columns):
-            if i % 100 == 0:
-                log.logger.info(f'SoftImpute imputing {gene}')
-
-            # transform to index: ind * columns: (cts)
-            Y = data[gene].unstack()
-
-            # Impute
-            out = _softimpute(Y)
-
-            # transform back
-            out = out.stack()
-            out.name = gene
-
-            imputed.append(out)
-
-        imputed = pd.concat(imputed, axis=1)
-
-    return (imputed)
+#     return (out)
 
 
-def _mvn(data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Impute missing ctp or ctnu
+# def softimpute(data: pd.DataFrame, seed: int = None, scale: bool = True,
+#                per_gene: bool = False) -> pd.DataFrame:
+#     '''
+#     Impute missing ctp or ct-specific noise variance (ctnu)
 
-    Parameters:
-        data:   ctp or ctnu of shape index: ind * columns: ct
-    Results:
-        imputed dataset
-    """
+#     Parameters:
+#         data:   ctp or ctnu of shape index: (ind, ct) * columns: genes
+#         seed:   seed for softImpute, only needed to be replicate imputation
+#         scale:  scale before imputation
+#         per_gene:   perform imputation per gene
+#     Results:
+#         imputed dataset
+#     '''
+#     if not per_gene:
+#         # transform to index: ind * columns: (genes: cts)
+#         data = data.unstack()
 
-    # load MVN r package
-    is_sourced = r("exists('MVN_impute')")[0]
-    if not is_sourced:
-        rf = pkg_resources.resource_filename(__name__, 'mvn.R')
-        mvn_r = STAP(open(rf).read(), 'mvn_r')
-    pandas2ri.activate()
+#         # impute
+#         imputed = _softimpute(data, seed, scale)
 
-    # impute
-    out = mvn_r.MVN_impute(r['as.matrix'](data))
-    out = dict(zip(out.names, list(out)))
-    out = pd.DataFrame(out['Y'], index=data.index, columns=data.columns)
+#         # transform back
+#         imputed = imputed.stack()
+#     else:
+#         imputed = []
+#         for i, gene in enumerate(data.columns):
+#             if i % 100 == 0:
+#                 log.logger.info(f'SoftImpute imputing {gene}')
 
-    pandas2ri.deactivate()
+#             # transform to index: ind * columns: (cts)
+#             Y = data[gene].unstack()
 
-    return out
+#             # Impute
+#             out = _softimpute(Y)
+
+#             # transform back
+#             out = out.stack()
+#             out.name = gene
+
+#             imputed.append(out)
+
+#         imputed = pd.concat(imputed, axis=1)
+
+#     return (imputed)
 
 
-def mvn(data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Impute missing ctp or ctnu
+# def _mvn(data: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Impute missing ctp or ctnu
 
-    Parameters:
-        data:   ctp or ctnu of shape index: (ind, ct) * columns: genes
-    Results:
-        imputed dataset
-    """
+#     Parameters:
+#         data:   ctp or ctnu of shape index: ind * columns: ct
+#     Results:
+#         imputed dataset
+#     """
 
-    imputed = []
-    for i, gene in enumerate(data.columns):
-        if i % 100 == 0:
-            log.logger.info(f'MVN imputing {gene}')
+#     # load MVN r package
+#     is_sourced = r("exists('MVN_impute')")[0]
+#     if not is_sourced:
+#         rf = pkg_resources.resource_filename(__name__, 'mvn.R')
+#         mvn_r = STAP(open(rf).read(), 'mvn_r')
+#     pandas2ri.activate()
 
-        # transform to index: ind * columns: (cts)
-        Y = data[gene].unstack()
+#     # impute
+#     out = mvn_r.MVN_impute(r['as.matrix'](data))
+#     out = dict(zip(out.names, list(out)))
+#     out = pd.DataFrame(out['Y'], index=data.index, columns=data.columns)
 
-        # Impute
-        out = _mvn(Y)
+#     pandas2ri.deactivate()
 
-        # transform back
-        out = out.stack()
-        out.name = gene
+#     return out
 
-        imputed.append(out)
 
-    imputed = pd.concat(imputed, axis=1)
+# def mvn(data: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Impute missing ctp or ctnu
 
-    return imputed
+#     Parameters:
+#         data:   ctp or ctnu of shape index: (ind, ct) * columns: genes
+#     Results:
+#         imputed dataset
+#     """
+
+#     imputed = []
+#     for i, gene in enumerate(data.columns):
+#         if i % 100 == 0:
+#             log.logger.info(f'MVN imputing {gene}')
+
+#         # transform to index: ind * columns: (cts)
+#         Y = data[gene].unstack()
+
+#         # Impute
+#         out = _mvn(Y)
+
+#         # transform back
+#         out = out.stack()
+#         out.name = gene
+
+#         imputed.append(out)
+
+#     imputed = pd.concat(imputed, axis=1)
+
+#     return imputed
 
 
 def _std(ctp: pd.DataFrame, ctnu: pd.DataFrame, P: pd.DataFrame

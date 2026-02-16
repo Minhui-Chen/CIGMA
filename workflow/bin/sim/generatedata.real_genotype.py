@@ -1,10 +1,7 @@
 import os, math, re, sys
 import numpy as np
 import pandas as pd
-
-from scipy import stats
 from scipy import linalg
-
 
 
 def add_fixed(levels, ss, rng):
@@ -53,19 +50,17 @@ def adjust_min_value(arr, cut=0.01):
 
 
 def main():
-    batch = snakemake.params.batches[int(snakemake.wildcards.i)]
-
     # par
     beta = np.loadtxt(snakemake.input.beta)
     V = np.loadtxt(snakemake.input.V)
     W = np.loadtxt(snakemake.input.W)
     C = len(beta)
-    L = int(snakemake.params.get("L", snakemake.wildcards.L))
-    # nL = int(snakemake.params.get("nL", snakemake.wildcards.nL))
-    # tL = L + nL
-    Gs = np.load(snakemake.input.genes, allow_pickle=True).item()
-    gene_names = list(Gs.keys())
-    gene_names.sort()
+    L = snakemake.wildcards.L
+    Lp = None
+    if float(L) <= 1:
+        Lp = float(L)
+    else:
+        L = int(L)
 
     sig_g = float(snakemake.wildcards.vc.split('_')[1])
     sig_e = float(snakemake.wildcards.vc.split('_')[2])
@@ -74,143 +69,172 @@ def main():
     a = np.array([float(x) for x in snakemake.wildcards.a.split('_')])
     ss = int(float(snakemake.wildcards.ss))
 
+    # select genes
+    out = np.load(snakemake.params.out, allow_pickle=True).item()
+    onek1k_genes = out['gene']
 
-    data = {}
-    for i in batch:
-        rng = np.random.default_rng(snakemake.params.seed + i + ss + L)
-        gene_name = gene_names[i]
-        data[gene_name] = {}
+    genes = []
+    gene_fs = []
+    for gene_f in snakemake.input.genes:
+        gene_data = np.load(gene_f, allow_pickle=True).item()
+        new_genes = list(set(onek1k_genes) & set(gene_data.keys()))
+        genes += new_genes
+        gene_fs += [gene_f] * len(new_genes)
+    gene_fs = {gene: gene_f for gene, gene_f in zip(genes, gene_fs)}
+    assert len(genes) == len(onek1k_genes)
+    # check duplicate gene
+    assert len(genes) == len(set(genes))
+    # Randomly select genes 
+    n_select = 1000
+    indices = np.random.default_rng(12).choice(len(genes), n_select, replace=False)
+    indices = np.sort(indices)
+    genes = list(np.array(genes)[indices])
 
-        # simulate genotypes
-        G = Gs[gene_name]
-        assert G.shape[0] > ss, f"{G.shape[0]} samples in genotype but {ss} needed"
-        # random sample individuals
-        perm = rng.permutation(G.shape[0])[:ss]
-        G = G[perm, :]
-        # remove monomorphic SNPs
-        stds = np.std(G, axis=0)
-        G = G[:, stds > 0]
-        assert G.shape[1] > L, f"{G.shape[1]} SNPs in genotype but {L} needed"
 
-        data[gene_name]['rawG'] = G
+    # simulation
+    nbatch = len(snakemake.output.data)
+    batches = np.array_split(genes, nbatch)
+    old_gene_f = ''
+    inds = None
+    for k, batch in enumerate(batches):
+        out_f = snakemake.output.data[k]
+        print(f"Processing batch {k+1}/{nbatch}, saving to {out_f}")
+        data = {}
+        for gene_name in batch:
+            gene_f = gene_fs[gene_name]
+            if gene_f != old_gene_f:
+                print(f"Loading genotype data from {gene_f} for gene {gene_name}")
+                old_gene_f = gene_f
+                gene_data = np.load(gene_f, allow_pickle=True).item()
+            else:
+                print(f"Reusing loaded genotype data for gene {gene_name}")
+            
+            G = gene_data[gene_name]['G']
+            assert G.shape[0] > ss, f"{G.shape[0]} samples in genotype but {ss} needed"
+            if inds is None:
+                inds = np.random.default_rng(123).choice(G.shape[0], ss, replace=False)
+            G = G[inds, :]
+            n_snps = G.shape[1]
 
-        ## standardize
-        # if np.any(np.std(G, axis=0) == 0):
-        #    sys.exit(f'{sum(np.std(G, axis=0) == 0)}')
-        maf = np.mean(G, axis=0) / 2
-        G = (G - 2 * maf) / np.sqrt(2 * maf * (1 - maf))
+            # number of causal SNPs
+            if Lp is not None:
+                L = max(1, int(Lp * G.shape[1]))
+            L = min(L, G.shape[1])
 
-        ## save
-        data[gene_name]['G'] = G
+            ## standardize
+            maf = np.mean(G, axis=0) / 2
+            G = (G - 2 * maf) / np.sqrt(2 * maf * (1 - maf))
 
-        # calculate K
-        K = G @ G.T / G.shape[1]
-        data[gene_name]['K'] = K
+            # calculate K
+            K = G @ G.T / G.shape[1]
 
-        # subset causal variants
-        snps = rng.permutation(G.shape[1])[:L]
-        G = G[:, snps]
+            data[gene_name] = {}
+            data[gene_name]['K'] = K
 
-        # simulate SNP effect
-        ## additive effect
-        ### draw from normal distribution of N(0, hom2/L)
-        if sig_g == 0:
-            add = np.zeros(L)
-        else:
-            add = rng.normal(0, math.sqrt(sig_g / L), L)
-            add = add - np.mean(add)
-            add = add * math.sqrt(sig_g / L) / np.std(add)
-            if len(add) != L:
-                print(add)
-                print(len(add))
-                sys.exit('Weird')
+            # set random seed for each gene 
+            i = genes.index(gene_name)
+            rng = np.random.default_rng(snakemake.params.seed + i + ss + n_snps)
 
-        ## CT-specific SNP effect
-        if np.all(V == np.zeros_like(V)):
-            H = np.zeros((L, C))
-        else:
-            H = rng.multivariate_normal(np.zeros(C), V / L, L)  # of shape SNP x cell type
-            H = H - np.mean(H, axis=0)  # NOTE: covariance in Full model is not stded
-            H = (H * np.sqrt(np.diag(V)/L)) / np.std(H, axis=0)
+            # randomly select L SNPs
+            if L != G.shape[1]:
+                snp_inds = rng.choice(G.shape[1], L, replace=False)
+                G = G[:, snp_inds]
 
-        # calculate alpha, shared genetic effect
-        alpha_g = G @ add
+            # simulate SNP effect
+            ## additive effect
+            ### draw from normal distribution of N(0, hom2/L)
+            if sig_g == 0:
+                add = np.zeros(L)
+            else:
+                add = rng.normal(0, math.sqrt(sig_g / L), L)
+                # add = add - np.mean(add)
+                # add = add * math.sqrt(sig_g / L) / np.std(add)
 
-        # simulate shared noise
-        alpha_e = rng.normal(0, math.sqrt(sig_e), ss)
+            ## CT-specific SNP effect
+            if np.all(V == np.zeros_like(V)):
+                H = np.zeros((L, C))
+            else:
+                H = rng.multivariate_normal(np.zeros(C), V / L, L)  # of shape SNP x cell type
+                # H = H - np.mean(H, axis=0)  # NOTE: covariance in Full model is not stded
+                # H = (H * np.sqrt(np.diag(V)/L)) / np.std(H, axis=0)
+            # data[gene_name]['sig_g'] = np.var(add)
+            # data[gene_name]['V'] = np.var(H, axis=0)
 
-        # simulate cell type proportions
-        P = rng.dirichlet(alpha=a, size=ss)
-        P = adjust_min_value(P, 0.05)
-        assert np.allclose(P.sum(axis=1), np.ones(P.shape[0]))
-        data[gene_name]['P'] = P
-        pi = np.mean(P, axis=0)
-        data[gene_name]['pi'] = pi
+            # calculate alpha, shared genetic effect
+            alpha_g = G @ add
+            # data[gene_name]['alpha_g'] = np.var(alpha_g)
 
-        ## estimate S
-        ### demean P
-        pd = P - pi
-        ### covariance
-        s = (pd.T @ pd) / ss
-        # print(bmatrix(s))
-        data[gene_name]['s'] = s
+            # simulate shared noise
+            alpha_e = rng.normal(0, math.sqrt(sig_e), ss)
 
-        # calculate ct fixed effect
-        ct_main = P @ beta
+            # simulate cell type proportions
+            P = rng.dirichlet(alpha=a, size=ss)
+            P = adjust_min_value(P, 0.05)
+            assert np.allclose(P.sum(axis=1), np.ones(P.shape[0]))
+            data[gene_name]['P'] = P
+            pi = np.mean(P, axis=0)
+            data[gene_name]['pi'] = pi
 
-        # calculate ct-specific genetic
-        ct_g = linalg.khatri_rao(G.T, P.T).T @ H.flatten()
+            ## estimate S
+            ### demean P
+            pd = P - pi
+            ### covariance
+            s = (pd.T @ pd) / ss
+            # print(bmatrix(s))
+            data[gene_name]['s'] = s
 
-        # simulate cell type-specific noise
-        gamma_e = rng.multivariate_normal(np.zeros(C), W, ss)
-        # calculate cell type-specific noise for OP
-        ct_e = linalg.khatri_rao(np.eye(ss), P.T).T @ gamma_e.flatten()
+            # calculate ct fixed effect
+            ct_main = P @ beta
 
-        # draw residual error
-        ## draw variance of residual error for each individual from gamma distribution \Gamma(k, theta)
-        ## with mean = k * theta, var = k * theta^2, so theta = var / mean, k = mean / theta
-        ## since mean = 0.2 and assume var = 0.01, we can get k and theta
-        if mean_nu == 0:
-            nu = np.zeros(ss)
-            data[gene_name]['nu'] = nu
-            ctnu = np.zeros((ss, C))
-            data[gene_name]['ctnu'] = ctnu
-        else:
-            theta = var_nu / mean_nu
-            k = mean_nu / theta
-            ### variance of error for each individual
-            nu = rng.gamma(k, scale=theta, size=ss)
-            data[gene_name]['nu'] = nu
-            #### variance of error for each individual-cell type
-            ctnu = nu.reshape(-1, 1) * (1 / P)
-            data[gene_name]['ctnu'] = ctnu
+            # calculate ct-specific genetic
+            ct_g = linalg.khatri_rao(G.T, P.T).T @ H.flatten()
 
-        ## draw residual error from normal distribution with variance drawn above
-        error = rng.normal(loc=0, scale=np.sqrt(nu))
-        ct_error = rng.normal(loc=0, scale=np.sqrt(ctnu))
+            # simulate cell type-specific noise
+            gamma_e = rng.multivariate_normal(np.zeros(C), W, ss)
+            # calculate cell type-specific noise for OP
+            ct_e = linalg.khatri_rao(np.eye(ss), P.T).T @ gamma_e.flatten()
 
-        # generate overall pseudobulk
-        y = ct_main + alpha_g + alpha_e + ct_g + ct_e + error
-        Y = np.outer(np.ones(ss), beta) + np.outer(alpha_g + alpha_e, np.ones(C)) + G @ H + gamma_e + ct_error
+            # draw residual error
+            ## draw variance of residual error for each individual from gamma distribution \Gamma(k, theta)
+            ## with mean = k * theta, var = k * theta^2, so theta = var / mean, k = mean / theta
+            ## since mean = 0.2 and assume var = 0.01, we can get k and theta
+            if mean_nu == 0:
+                nu = np.zeros(ss)
+                data[gene_name]['nu'] = nu
+                ctnu = np.zeros((ss, C))
+                data[gene_name]['ctnu'] = ctnu
+            else:
+                theta = var_nu / mean_nu
+                k = mean_nu / theta
+                ### variance of error for each individual
+                nu = rng.gamma(k, scale=theta, size=ss)
+                data[gene_name]['nu'] = nu
+                #### variance of error for each individual-cell type
+                ctnu = nu.reshape(-1, 1) * (1 / P)
+                data[gene_name]['ctnu'] = ctnu
 
-        # add Extra fixed and random effect
-        if 'fixed' in snakemake.wildcards.keys():
-            X, b = add_fixed(int(snakemake.wildcards.fixed), ss, rng)
-            y = y + X @ b
-            Y = Y + (X @ b)[:, np.newaxis]
-            data[gene_name]['fixed'] = X
-        
-        if 'random' in snakemake.wildcards.keys():
-            X, b = add_random(int(snakemake.wildcards.random), ss, rng)
-            y = y + X @ b
-            Y = Y + (X @ b)[:, np.newaxis]
-            data[gene_name]['random'] = X
+            ## draw residual error from normal distribution with variance drawn above
+            error = rng.normal(loc=0, scale=np.sqrt(nu))
+            ct_error = rng.normal(loc=0, scale=np.sqrt(ctnu))
 
-        data[gene_name]['y'] = y
-        data[gene_name]['Y'] = Y
+            # generate overall pseudobulk
+            y = ct_main + alpha_g + alpha_e + ct_g + ct_e + error
+            GH = G @ H
+            # data[gene_name]['GH'] = np.var(GH, axis=0)
+            Y = np.outer(np.ones(ss), beta) + np.outer(alpha_g + alpha_e, np.ones(C)) + GH + gamma_e + ct_error
 
-    np.save(snakemake.output.data, data)
+            data[gene_name]['y'] = y
+            data[gene_name]['Y'] = Y
+
+        np.save(out_f, data)
 
 
 if __name__ == '__main__':
     main()
+
+
+
+
+
+
+    

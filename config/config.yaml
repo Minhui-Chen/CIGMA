@@ -3,8 +3,8 @@ colorpalette: bright
 
 # programs
 plink_load: module load gcc/11.3.0 plink/1.9
-partition1: express
-partition2: express
+partition1: tier1q
+partition2: tier2q
 partition3: tier3q
 
 sim:

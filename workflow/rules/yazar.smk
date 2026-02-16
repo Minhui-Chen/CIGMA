@@ -17,9 +17,6 @@ colors = [colorsys.hsv_to_rgb(*color) for color in colors]
 yazar_light_colors = dict(zip(yazar_ct_order[1:], colors))
 yazar_light_colors['hom'] = '0.9'
 
-# read parameters
-yazar_params = pd.read_table('yazar.params.txt', dtype="str", comment='#')
-yazar_paramspace = Paramspace(yazar_params, filename_params="*")
 
 
 
@@ -622,7 +619,7 @@ rule yazar_he_kinship_split:
     params:
         chrs = chrs,
     resources:
-        partition = config['partition3'], # TODO
+        partition = config['partition2'],
         mem_mb = '20G',
     script: '../bin/yazar/kinship.split.py'
 
@@ -672,8 +669,7 @@ rule yazar_HE_togz:
     script: '../bin/yazar/he.togz.py'
 
 
-# runtime
-rule yazar_HE_free_runtime:
+rule yazar_HE_free_benchmark:
     input:
         ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
         ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
@@ -683,20 +679,21 @@ rule yazar_HE_free_runtime:
         geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
         obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
     output:
-        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{{i}}.runtime.npy',
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{{i}}.benchmark.npy',
     params:
         snps = 5, # threshold of snp number per gene
         iid = False,
         full = False,
+    benchmark: f"benchmark/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{{i}}.benchmark.txt",
     resources:
         partition = config['partition2'],
-        mem_mb = '16G',
+        mem_mb = '20G',
     script: '../bin/yazar/he.runtime.py' 
 
 
 use rule yazar_HE_free_merge as yazar_HE_free_runtime_merge with:
     input:
-        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{i}.runtime.npy'
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{i}.benchmark.npy'
             for i in range(yazar_he_batches)],
     output:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/he.runtime.npy',
@@ -818,16 +815,18 @@ rule yazar_reml:
         out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.batch{{i}}.npy',
     params:
         snps = 5, # threshold of snp number per gene
+    benchmark: f"benchmark/yazar/{yazar_paramspace.wildcard_pattern}/reml.batch{{i}}.benchmark.txt",
     resources:
-        partition = config['partition2'],
-        mem_mb = '16G',
+        partition = config['partition1'],
+        mem_mb = '10G',
     script: '../bin/yazar/reml.py' 
 
 
 use rule yazar_HE_free_merge as yazar_reml_merge with:
     input:
         out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.batch{i}.npy'
-            for i in range(yazar_reml_batches)],
+            for i in range(500)],
+            # for i in range(yazar_reml_batches)],
     output:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/reml.npy',
 
@@ -1703,6 +1702,41 @@ rule yazar_trans_all:
 
 
 
+
+
+
+rule yazar_trans_HE_free_benchmark:
+    input:
+        ctp = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctp.batch{{i}}.gz',
+        ctnu = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/ctnu.batch{{i}}.gz',
+        kinship = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he/kinship.batch{{i}}.npy',
+        P = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/P.final.gz',
+        op_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/pca.gz',
+        geno_pca = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/geno.eigenvec',
+        obs = 'analysis/yazar/exclude_repeatedpool.obs.txt',
+        genome = [f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/trans/he/chr{chr}.rel'
+                    for chr in chrs],
+        genes = 'data/Yazar2022Science/gene_location.txt',
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.batch{{i}}.benchmark.npy',
+    params:
+        chrs = chrs,
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+    benchmark: f"benchmark/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.batch{{i}}.benchmark.txt",
+    resources:
+        partition = 'tier2q',
+        mem_mb = lambda wildcards:'40G' if wildcards.batch != 'shared' else '40G',
+    script: '../bin/yazar/he.trans.benchmark.py' 
+
+
+use rule yazar_HE_free_merge as yazar_trans_HE_free_benchmark_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.batch{i}.benchmark.npy'
+            for i in range(yazar_he_batches)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.benchmark.npy',
 
 
 

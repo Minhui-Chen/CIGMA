@@ -9,11 +9,10 @@ import numpy.typing as npt
 # import jaxopt
 # import tensorflow as tf
 # import tensorflow_probability as tfp
-import rpy2.robjects as ro
-from rpy2.robjects import r, pandas2ri, numpy2ri
-from rpy2.robjects.conversion import localconverter
+# import rpy2.robjects as ro
+# from rpy2.robjects import r, pandas2ri, numpy2ri
+# from rpy2.robjects.conversion import localconverter
 from scipy import stats, linalg, optimize
-from numpy.random import default_rng
 
 from . import log, fit, wald
 
@@ -520,49 +519,49 @@ def re_optim(out: dict, opt: dict, fun: callable, par: list, args: tuple,
     return out, opt
 
 
-def dict2Rlist(X: dict) -> object:
-    """
-    Transform a python dictionary to R list
+# def dict2Rlist(X: dict) -> object:
+    # """
+    # Transform a python dictionary to R list
 
-    Parameters:
-        X:  python dictionary
-    Returns:
-        R list
-    """
-    if len(X.keys()) == 0:
-        return r('NULL')
-    else:
-        keys = np.sort(list(X.keys()))
-        rlist = ro.ListVector.from_length(len(keys))
-        for i in range(len(keys)):
-            if isinstance(X[keys[i]], str):
-                if os.path.exists(X[keys[i]]):
-                    rlist[i] = r['as.matrix'](r['read.table'](X[keys[i]]))
-                else:
-                    try:
-                        rlist[i] = np.array([X[keys[i]]])
-                    except:
-                        numpy2ri.activate()  # don't think this is useful
-                        rlist[i] = np.array([X[keys[i]]])
-                        numpy2ri.deactivate()  # deactivate would cause numpy2ri deactivated in calling fun
-            elif isinstance(X[keys[i]], pd.DataFrame):
-                with localconverter(ro.default_converter + pandas2ri.converter):
-                    rlist[i] = r['as.matrix'](X[keys[i]])
-            elif isinstance(X[keys[i]], np.ndarray):
-                try:
-                    rlist[i] = r['as.matrix'](X[keys[i]])
-                except:
-                    numpy2ri.activate()
-                    rlist[i] = r['as.matrix'](X[keys[i]])
-                    numpy2ri.deactivate()
-            elif isinstance(X[keys[i]], int) or isinstance(X[keys[i]], float):
-                try:
-                    rlist[i] = np.array([X[keys[i]]])
-                except:
-                    numpy2ri.activate()
-                    rlist[i] = np.array([X[keys[i]]])
-                    numpy2ri.deactivate()
-        return rlist
+    # Parameters:
+    #     X:  python dictionary
+    # Returns:
+    #     R list
+    # """
+    # if len(X.keys()) == 0:
+    #     return r('NULL')
+    # else:
+    #     keys = np.sort(list(X.keys()))
+    #     rlist = ro.ListVector.from_length(len(keys))
+    #     for i in range(len(keys)):
+    #         if isinstance(X[keys[i]], str):
+    #             if os.path.exists(X[keys[i]]):
+    #                 rlist[i] = r['as.matrix'](r['read.table'](X[keys[i]]))
+    #             else:
+    #                 try:
+    #                     rlist[i] = np.array([X[keys[i]]])
+    #                 except:
+    #                     numpy2ri.activate()  # don't think this is useful
+    #                     rlist[i] = np.array([X[keys[i]]])
+    #                     numpy2ri.deactivate()  # deactivate would cause numpy2ri deactivated in calling fun
+    #         elif isinstance(X[keys[i]], pd.DataFrame):
+    #             with localconverter(ro.default_converter + pandas2ri.converter):
+    #                 rlist[i] = r['as.matrix'](X[keys[i]])
+    #         elif isinstance(X[keys[i]], np.ndarray):
+    #             try:
+    #                 rlist[i] = r['as.matrix'](X[keys[i]])
+    #             except:
+    #                 numpy2ri.activate()
+    #                 rlist[i] = r['as.matrix'](X[keys[i]])
+    #                 numpy2ri.deactivate()
+    #         elif isinstance(X[keys[i]], int) or isinstance(X[keys[i]], float):
+    #             try:
+    #                 rlist[i] = np.array([X[keys[i]]])
+    #             except:
+    #                 numpy2ri.activate()
+    #                 rlist[i] = np.array([X[keys[i]]])
+    #                 numpy2ri.deactivate()
+    #     return rlist
 
 
 def generate_HE_initial(he: dict, ML: bool = False, REML: bool = False) -> list:
@@ -1551,36 +1550,36 @@ def read_ensembl(f: str) -> pd.DataFrame:
     return res
 
 
-def h2_equal_test(formula: List[str], var: Union[np.ndarray, list], cov: np.ndarray, 
-                  ct_h2: np.ndarray) -> float:
-    '''
-    Delta method to test equal h2 across cell types
+# def h2_equal_test(formula: List[str], var: Union[np.ndarray, list], cov: np.ndarray, 
+#                   ct_h2: np.ndarray) -> float:
+#     '''
+#     Delta method to test equal h2 across cell types
 
-    Parameters:
-        formula:    a formula mapping from variance to h2, e.g. '~(x1)/(x1+x2)'
-                    x1, x2 indicate the first and second element in mean
-        var:    estimates of variance parameters, e.g. genetic variance, environment variance
-        cov:    estiamted covariance matrix of variance parameters
+#     Parameters:
+#         formula:    a formula mapping from variance to h2, e.g. '~(x1)/(x1+x2)'
+#                     x1, x2 indicate the first and second element in mean
+#         var:    estimates of variance parameters, e.g. genetic variance, environment variance
+#         cov:    estiamted covariance matrix of variance parameters
 
-    Returns:
-        p value for ct-specific h2
-    '''
+#     Returns:
+#         p value for ct-specific h2
+#     '''
 
-    # convert string to R list of formula
-    formula_fun = r('function(x) as.formula(x)')
-    formula = ro.StrVector(formula)
-    formula = r['lapply'](formula, formula_fun)
+#     # convert string to R list of formula
+#     formula_fun = r('function(x) as.formula(x)')
+#     formula = ro.StrVector(formula)
+#     formula = r['lapply'](formula, formula_fun)
 
-    numpy2ri.activate()
+#     numpy2ri.activate()
 
-    h2Covmat = r('msm::deltamethod')(formula, var, cov, ses=False)
+#     h2Covmat = r('msm::deltamethod')(formula, var, cov, ses=False)
 
-    numpy2ri.deactivate()
+#     numpy2ri.deactivate()
 
-    # test h2
-    p = wald_ct_beta(ct_h2, h2Covmat)  # NOTE: using chi-square test
+#     # test h2
+#     p = wald_ct_beta(ct_h2, h2Covmat)  # NOTE: using chi-square test
 
-    return p
+#     return p
 
 
 def _op_partition_mean(beta: np.ndarray, S: np.ndarray, ) -> float:

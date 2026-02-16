@@ -13,33 +13,6 @@ sim_par_columns = list(sim_params.columns)
 sim_par_columns.remove('model')
 sim_paramspace = Paramspace(sim_params[sim_par_columns], filename_params="*")
 
-# sim_plot_order = {
-#     'hom':{
-#         'ss':['50', '100', '200', '300', '500', '1000', '1500', '2000'], 
-#         'a':['0.5_2_2_2', '1_2_2_2', '2_2_2_2', '4_2_2_2']
-#         },
-#     'iid':{
-#         'ss':['50', '100', '300', '500', '1000'], 'a':['0.5_2_2_2', '1_2_2_2', '2_2_2_2', '4_2_2_2'],
-#         'vc':['0.3_0.2_0.2_0.0333_0.2667_0', '0.3_0.15_0.25_0.05_0.25_0', '0.3_0.1_0.3_0.0666_0.2334_0',
-#                 '0.3_0.15_0.15_0.05_0.15_0.2', '0.3_0.15_0.05_0.05_0.05_0.4'],
-#         }, 
-#     'free': {
-#         'ss':['50', '100', '200', '300','500', '1000', '1500', '2000'], 
-#         'a':['0.5_2_2_2', '1_2_2_2', '2_4_4_4', '2_2_2_2', '4_2_2_2', '8_2_2_2'], 
-#         'vc':['0.3_0.1_0.1_0.05_0.15_0.3', '0.3_0.1_0.1_0.1_0.1_0.3', '0.2_0.1_0.1_0.2_0.2_0.2', 
-#             '0.1_0.01_0.194_0.001_0.05_0.645', '0.1_0.05_0.15_0.005_0.05_0.645'],
-#         'V_diag':['0.5_1_1_1', '1_1_1_1', '2_1_1_1', '10_1_1_1'],
-#         },
-#     'freeW': {
-#         'ss':['50', '100', '200', '300','500', '1000'],
-#         },
-#     'full':{
-#         'ss':['50', '100', '200', '300', '500', '1000', '2000'], 'a':['0.5_2_2_2', '1_2_2_2', '2_2_2_2', '4_2_2_2'],
-#         'vc':['0.3_0.1_0.1_0.1_0.1_0.3', '0.2_0.1_0.1_0.2_0.2_0.2', '0.1_0.1_0.1_0.3_0.3_0.1'],
-#         'V_diag':['1_1_1_1', '8_4_2_1', '27_9_3_1', '64_16_4_1', '64_64_1_1'],
-#         'V_tril':['0.25_0.25_0_-0.25_0_0', '0.5_0.5_0_-0.5_0_0', '0.75_0.75_0_-0.75_0_0', '0.95_0.95_0.95_-0.95_-0.95_-0.95']
-#         },
-#     }
 
 
 rule sim_celltype_expectedPInSnBETAnVnW:
@@ -67,7 +40,7 @@ rule sim_generatedata:
         maf = 0.05,
         seed = 273672,
     resources:
-        mem_mb = '1G',
+        mem_mb = '1G',  
     script: '../bin/sim/generatedata.add_neutral.py'
 
 
@@ -94,6 +67,42 @@ rule sim_mergeBatches_HE:
     resources:
         partition = config['partition1'],
     script: '../bin/mergeBatches.py'
+
+
+sim_benchmark_batches = np.array_split(range(config['sim']['replicates']), 
+                            config['sim']['replicates'])
+
+use rule sim_generatedata as sim_generatedata_benchmark with:
+    output:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.batch{{i}}.benchmark.npy',
+    params:
+        batches = sim_benchmark_batches,
+        beta = (0.5, 0.5), # beta distribution for allele frequency
+        maf = 0.05,
+        seed = 273672,
+
+
+rule sim_HE_benchmark:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.batch{{i}}.benchmark.npy',
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/he.batch{{i}}.benchmark.npy',
+    resources:
+        partition = lambda wildcards: config['partition1'] if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else config['partition2'],
+        mem_mb = lambda wildcards: '6G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else '20G' if len(wildcards.a.split('_')) <=4 else '30G',
+    params:
+        free_jk = False,
+        full = False,
+    benchmark: f"benchmark/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/he.batch{{i}}.benchmark.txt",
+    script: '../bin/sim/he.benchmark.py'
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_HE_benchmark with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/he.batch{i}.benchmark.npy' 
+                for i in range(config['sim']['replicates'])],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.he.benchmark.npy',
 
 
 def sim_agg_he_truebeta_subspace(wildcards):
@@ -150,47 +159,6 @@ rule sim_agg_he_out:
 
 
 
-
-
-# TODO: tmp LD SNPs
-rule sim_generatedata_ld:
-    input:
-        beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
-        V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
-        W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
-    output:
-        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim2.batch{{i}}.npy',
-    params:
-        batches = sim_batches,
-        beta = (0.5, 0.5), # beta distribution for allele frequency
-        maf = 0.05,
-        seed = 273672,
-    resources:
-        partition = config['partition1'],
-        mem_mb = '1G',
-    script: '../bin/sim/generatedata.add_neutral.ld.py'
-
-
-rule sim_HE_ld:
-    input:
-        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim2.batch{{i}}.npy',
-    output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/he.batch{{i}}.npy',
-    resources:
-        partition = lambda wildcards: config['partition1'] if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else config['partition2'],
-        mem_mb = lambda wildcards: '6G' if int(wildcards.ss) <= 1000 and len(wildcards.a.split('_')) <=4 else '20G' if len(wildcards.a.split('_')) <=4 else '30G',
-    script: '../bin/sim/he.tmp.py'
-
-
-use rule sim_mergeBatches_HE as sim_mergeBatches_HE_ld with:
-    input:
-        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/he.batch{i}.npy' 
-                for i in range(config['sim']['batch_no'])],
-    output:
-        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/out2.he.npy',
-
-
-
 ##########################################
 # REML
 ##########################################
@@ -202,7 +170,6 @@ rule sim_REML:
     resources:
         time = '100:00:00',
         mem_mb = '5G',
-    priority: 1
     script: '../bin/sim/reml.py'
 
 
@@ -212,6 +179,20 @@ use rule sim_mergeBatches_HE as sim_mergeBatches_REML with:
                 for i in range(config['sim']['batch_no'])],
     output:
         out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.npy',
+
+
+use rule sim_REML as sim_REML_benchmark with:
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{{i}}.benchmark.npy',
+    benchmark: f"benchmark/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{{i}}.benchmark.txt",
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_REML_benchmark with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{i}.benchmark.npy' 
+                for i in range(config['sim']['batch_no'])],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.benchmark.npy',
 
 
 def sim_agg_reml_out_subspace(wildcards):
@@ -293,85 +274,29 @@ rule sim_realgeno_extract_genotypes:
         '''
 
 
-rule sim_realgeno_pick_genes:
-    input:
-        genes = expand('staging/sim/genes.chr{chr}.genotype.npy', chr=range(1,23)),
-    output:
-        genes = f'analysis/sim/simulated_genes.npy',
-    params:
-        n_genes = int(config['sim']['replicates']),
-        seed = 12345,
-        nsnp_cutoff = 20,
-    resources:
-        partition = 'tier3q',
-        mem_mb = '120G',
-    run:
-        genes = []
-        for gene_f in input.genes:
-            print(gene_f, flush=True)
-            gene_data = np.load(gene_f, allow_pickle=True).item()
-            # exclude genes with variants less than 20
-            genes = genes + [k for k, v in gene_data.items() if v['nsnps'] >= params.nsnp_cutoff]
-
-        genes = list(set(genes))
-        genes.sort()
-        print(len(genes))
-        assert len(genes) >= params.n_genes
-        rng = np.random.default_rng(params.seed)
-        sampled_genes = rng.choice(genes, size=params.n_genes, replace=False)
-        # extract genotype data for sampled genes
-        data = {}
-        for gene_f in input.genes:
-            print(gene_f, flush=True)
-            gene_data = np.load(gene_f, allow_pickle=True).item()
-            gene_data = {k: v['G'] for k, v in gene_data.items() if k in sampled_genes}
-            data.update(gene_data)
-
-        np.save(output.genes, data)
-
-
 rule sim_realgeno_generatedata:
     input:
         beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
         V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
         W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
-        genes = expand('staging/sim/genes.chr{chr}.genotype.npy', chr=range(1,23)),
+        genes = expand('staging/sim/genes.chr{chr}.genotype3.npy', chr=range(1,23)),
     output:
-        data = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{i}.npy'
+        data = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/yazarL_{{L}}/sim.batch{i}.npy'
                 for i in range(config['sim']['batch_no'])],
     params:
+        out = 'analysis/yazar/ind_min_cellnum~10_ct_min_cellnum~10_prop~0.9_geno_pca_n~6_op_pca_n~1_batch~shared_fixed~shared/he.npy',
         seed = 2713672,
     resources:
         partition = config['partition3'],
         mem_mb = '120G',
-    script: '../bin/sim/generatedata2.real_genotype.py'
-
-
-# rule sim_realgeno_generatedata:
-#     input:
-#         beta = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/celltypebeta.txt',
-#         V = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/V.txt',
-#         W = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/W.txt',
-#         genes = f'analysis/sim/simulated_genes.npy',
-#     output:
-#         data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{{i}}.npy',
-#     params:
-#         batches = sim_batches,
-#         # beta = (0.5, 0.5), # beta distribution for allele frequency
-#         # maf = 0.05,
-#         seed = 2713672,
-#     resources:
-#         partition = config['partition3'],
-#         mem_mb = '35G',
-#     priority: 1
-#     script: '../bin/sim/generatedata.real_genotype.py'
+    script: '../bin/sim/generatedata.real_genotype.py'
 
 
 use rule sim_HE as sim_realgeno_HE with:
     input:
-        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/sim.batch{{i}}.npy',
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/yazarL_{{L}}/sim.batch{{i}}.npy',
     output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/he.batch{{i}}.npy',
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/yazarL_{{L}}/he.batch{{i}}.npy',
     params:
         free_jk = False,
         full = False,
@@ -382,14 +307,36 @@ use rule sim_HE as sim_realgeno_HE with:
 
 use rule sim_mergeBatches_HE as sim_realgeno_mergeBatches_HE with:
     input:
-        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/realgeno/he.batch{i}.npy' 
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/yazarL_{{L}}/he.batch{i}.npy' 
                 for i in range(config['sim']['batch_no'])],
     output:
-        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.realgeno.he.npy',
+        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/yazarL_{{L}}/out.realgeno.he.npy',
 
 
+def sim_realgeno_agg_he_out_subspace(wildcards):
+    subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
+    return expand('analysis/sim/{{model}}/{params}/yazarL_{{L}}/out.realgeno.he.npy', params=subspace.instance_patterns)
 
 
+use rule sim_agg_he_out as sim_realgeno_agg_he_out with:
+    input:
+        out = sim_realgeno_agg_he_out_subspace,
+    output:
+        out = 'analysis/sim/{model}/yazarL_{L}/AGG{arg}.he.npy',
+
+
+rule sim_agg_L:
+    input:
+        out = expand('analysis/sim/free5/yazarL_{L}/AGGss.he.npy', L=[0.1, 0.2, 1, 10, 20, 100]),
+    output:
+        out = 'analysis/sim/free5/yazar/AGGss.he.npy',
+    params:
+        L = [0.1, 0.2, 1, 10, 20, 100],
+    run:
+        data = {}
+        for L, out in zip(params.L, input.out):
+            data[L] = np.load(out, allow_pickle=True).item()
+        np.save(output.out, data)
 
 
 

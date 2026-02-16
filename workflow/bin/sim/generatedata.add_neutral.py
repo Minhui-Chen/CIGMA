@@ -114,10 +114,6 @@ def main():
             add = rng.normal(0, math.sqrt(sig_g / L), L)
             add = add - np.mean(add)
             add = add * math.sqrt(sig_g / L) / np.std(add)
-            if len(add) != L:
-                print(add)
-                print(len(add))
-                sys.exit('Weird')
 
         ## CT-specific SNP effect
         if np.all(V == np.zeros_like(V)):
@@ -129,6 +125,7 @@ def main():
 
         # calculate alpha, shared genetic effect
         alpha_g = G @ add
+        # data[i]['alpha_g'] = np.var(alpha_g)
 
         # simulate shared noise
         alpha_e = rng.normal(0, math.sqrt(sig_e), ss)
@@ -185,7 +182,9 @@ def main():
 
         # generate overall pseudobulk
         y = ct_main + alpha_g + alpha_e + ct_g + ct_e + error
-        Y = np.outer(np.ones(ss), beta) + np.outer(alpha_g + alpha_e, np.ones(C)) + G @ H + gamma_e + ct_error
+        GH = G @ H
+        # data[i]['GH'] = np.var(GH, axis=0)
+        Y = np.outer(np.ones(ss), beta) + np.outer(alpha_g + alpha_e, np.ones(C)) + GH + gamma_e + ct_error
 
         # add Extra fixed and random effect
         if 'fixed' in snakemake.wildcards.keys():

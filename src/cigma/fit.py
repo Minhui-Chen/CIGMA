@@ -439,7 +439,6 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
         QTt = np.tensordot(Q, t, axes=([1, 2], [0, 1]))
 
     elif model == 'full':
-        log.logger.info('Making Q')
         Q = []
         for c in range(C):
             L = util.L_f(C, c, c)
@@ -466,7 +465,6 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
                     L = util.L_f(C, c, c)
                     Q.append( _pMp(X, X_inv, ZZT, L) )
 
-        log.logger.info('Calculating Q products')
         QTQ = np.tensordot(Q, Q, axes=([1, 2], [1, 2]))
         QTt = np.tensordot(Q, t, axes=([1, 2], [0, 1]))
 
@@ -474,6 +472,8 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
     # theta
     try:
         theta = sla.inv(QTQ) @ QTt
+        # theta = sla.solve(QTQ, QTt)
+        print(theta)
     except np.linalg.LinAlgError as e:
         print(e)
         print(QTQ)

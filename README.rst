@@ -35,7 +35,7 @@ CIGMA
 
 
 CIMGA is a Python package for the decomposition of cell type-shared and -specific eQTLs using the CIGMA model.
-For a full description of CIGMA, please refer to the original paper: https://doi.org/10.1101/2023.08.01.551679.
+For a full description of CIGMA, please refer to the original paper: https://doi.org/??.??????/??????????.
 
 This repository contains scripts for data analyses in our paper. `Snakemake files <workflow/rules>`_ contain steps for running CIGMA model on simulated and real data.
 
@@ -61,6 +61,7 @@ To install only the CIGMA Python package, run (Installation should complete with
 pip install cigma
 ```
 
+Denpendices of CIGMA are listed in the "install_requires" section of the `setup.cfg <setup.cfg>`_ file.
 
 To run the tests, run:
 

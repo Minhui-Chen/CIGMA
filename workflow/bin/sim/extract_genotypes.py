@@ -51,14 +51,15 @@ def extract_genotypes(bfile, chrom, start, end, maf, plink_path="plink"):
         ]
         print("Running:", " ".join(cmd_maf), flush=True)
         try:
-            subprocess.run(cmd_maf, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = subprocess.run(cmd_maf, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print("STDOUT:", result.stdout.decode())
         except subprocess.CalledProcessError as e:
             print("Error occurred while running PLINK for MAF calculation")
             print("STDOUT:", e.stdout.decode())
             print("STDERR:", e.stderr.decode())
             sys.exit(1)
         maf_df = pd.read_csv(maf_out, sep="\s+")
-        valid_snps = maf_df[maf_df["MAF"] >= float(maf)]["SNP"].tolist()
+        valid_snps = maf_df[maf_df["MAF"] > float(maf)]["SNP"].tolist()
         if len(valid_snps) == 0:
             shutil.rmtree(tmpdir)
             return np.empty((0,0))
@@ -76,7 +77,8 @@ def extract_genotypes(bfile, chrom, start, end, maf, plink_path="plink"):
         ]
         print("Running:", " ".join(cmd), flush=True)
         try:
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print("STDOUT:", result.stdout.decode())
         except subprocess.CalledProcessError as e:
             print("Error occurred while running PLINK")
             print("STDOUT:", e.stdout.decode())
