@@ -1,0 +1,22 @@
+include README.rst
+include LICENSE.txt
+include pyproject.toml
+include setup.cfg
+include setup.py
+
+recursive-include src *.py
+
+prune workflow
+prune docs
+prune envs
+prune tests
+prune config
+
+exclude *.params.txt
+exclude .coveragerc
+exclude .gitignore
+exclude .readthedocs.yml
+exclude tox.ini
+
+global-exclude *.pyc
+global-exclude __pycache__
