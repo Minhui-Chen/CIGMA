@@ -51,8 +51,18 @@ def main():
 
     # Print p-values
     print("\n--- P-values ---")
-    for key, val in pvalues.items():
-        print(f"  {key}: {val}")
+    print("Testing if shared genetic variance (hom_g2) > 0:")
+    print(f"  p-value: {pvalues['hom_g2']:.4e}")
+    print("Testing if shared environ variance (hom_e2) > 0:")
+    print(f"  p-value: {pvalues['hom_e2']:.4e}")
+    print("Testing if CT-specific genetic variance (V) > 0:")
+    print(f"  p-value: {pvalues['V']:.4e}")
+    for i in range(C):
+        print(f"Testing if specific genetic variance for cell type {i+1} (V[{i+1},{i+1}]) > 0:")
+        print(f"  p-value: {pvalues['vc'][i]:.4e}")
+    print("Testing if CT-specific environ variance (W) > 0:")
+    print(f"  p-value: {pvalues['W']:.4e}")
+
 
     print("\nTest passed!")
 
