@@ -107,6 +107,10 @@ CIGMA provides helper functions to generate model input from scRNA-seq data that
    ctp, ctnu, P, n = preprocess.pseudobulk(
        ann=ann, ind_col='ind', ct_col='ct', cell_col='cell'
    )
+   # or
+   ctp, ctnu, P, n = preprocess.pseudobulk(
+       X=ann.X, obs=ann.obs, var=ann.var, ind_col='ind', ct_col='ct', cell_col='cell'
+   )
 
    # Remove genes or cell types to match the requirement of CIGMA that genes are expressed in all cell types.
    # For example, keep cell types CT1 and CT2 that all genes are expressed in, and remove other cell types.
