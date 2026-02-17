@@ -80,7 +80,7 @@ To verify the installation:
 
 .. code-block:: bash
 
-   python3 tests/test.py
+   python3 -m cigma.tests.test
 
 
 Quick start
