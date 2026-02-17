@@ -473,7 +473,7 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
     try:
         theta = sla.inv(QTQ) @ QTt
         # theta = sla.solve(QTQ, QTt)
-        print(theta)
+        # print(theta)
     except np.linalg.LinAlgError as e:
         print(e)
         print(QTQ)
@@ -1256,7 +1256,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
         fixed_covars: dict={}, random_covars: dict={}, 
         Kt:Optional[np.ndarray] = None, fixed_shared:bool=True, 
         random_shared:bool=True, jk:bool = True, prop: float = 1, 
-        dtype: Optional[str] = None) -> Tuple[dict, dict]:
+        dtype: Optional[str] = None, verbose: bool = False) -> Tuple[dict, dict]:
     """
     Fitting Free model with HE
 
@@ -1273,6 +1273,7 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
         jk: perform jackknife
         prop: number of replicates for jackknife prop * N
         dtype:  data type for he_ols, e.g. float32
+        verbose: whether to output detailed information
 
     Returns:
         a tuple of
@@ -1385,22 +1386,23 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
                 'vc': np.array([wald.wald_test(out['V'][i, i], 0, var_V[i, i], N - n_par) for i in range(C)]), # p for each cell type
                 'hom_e2': wald.wald_test(out['hom_e2'], 0, var_hom_e2, N - n_par),
                 'W': wald.mvwald_test(np.diag(out['W']), np.zeros(C), var_W, n=N, P=n_par),
-                'var_hom_g2': var_hom_g2,
-                'var_V': var_V,
-                'var_hom_e2': var_hom_e2,
-                'var_W': var_W,
-                'var_shared_h2': var_shared_h2,
-                'var_specific_h2': var_specific_h2,
-                'var_specificity': var_specificity,
-                'jk_hom_g2': np.array(jacks['hom_g2']),  # NOTE: tmp
-                'jk_V': np.array(jacks['V']),  # NOTE: tmp
-                'jk_hom_e2': np.array(jacks['hom_e2']),  # NOTE: tmp
-                'jk_W': np.array(jacks['W']),  # NOTE: tmp
-                'jk_shared_h2': np.array(jacks['shared_h2']),  # NOTE: tmp
-                'jk_specific_h2': np.array(jacks['specific_h2']),  # NOTE: tmp
-                # 'jk_specificity': np.array(jacks['specificity']), # NOTE: tmp
                 }
         
+        if verbose:
+            p['var_hom_g2'] = var_hom_g2
+            p['var_V'] = var_V
+            p['var_hom_e2'] = var_hom_e2
+            p['var_W'] = var_W
+            p['var_shared_h2'] = var_shared_h2
+            p['var_specific_h2'] = var_specific_h2
+            p['var_specificity'] = var_specificity
+            p['jk_hom_g2'] = np.array(jacks['hom_g2'])
+            p['jk_V'] = np.array(jacks['V'])
+            p['jk_hom_e2'] = np.array(jacks['hom_e2'])
+            p['jk_W'] = np.array(jacks['W'])
+            p['jk_shared_h2'] = np.array(jacks['shared_h2'])
+            p['jk_specific_h2'] = np.array(jacks['specific_h2'])
+            # p['jk_specificity'] = np.array(jacks['specificity'])
 
         # if Kt is None:
             # h2
@@ -1416,15 +1418,16 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
             p['V_b'] = wald.mvwald_test(np.diag(out['V_b']), np.zeros(C), 
                                         p['var_V_b'], n=N, P=n_par)
             p['vc_b'] = np.array([wald.wald_test(out['V_b'][i, i], 0, p['var_V_b'][i, i], N - n_par) for i in range(C)]), # p for each cell type
-            p['var_shared_h2_b'] = (N - 1) * np.var(jacks['shared_h2_b'])
-            p['var_specific_h2_b'] = (N - 1) * np.var(jacks['specific_h2_b'])
-            p['var_shared_h2_total'] = (N - 1) * np.var(jacks['shared_h2_total'])
-            p['var_specific_h2_total'] = (N - 1) * np.var(jacks['specific_h2_total'])
-            p['jk_hom_g2_b'] = np.array(jacks['hom_g2_b'])  # NOTE: tmp
-            p['jk_V_b'] = np.array(jacks['V_b'])  # NOTE: tmp
-            p['jk_shared_h2_b'] = np.array(jacks['shared_h2_b'])  # NOTE: tmp
-            p['jk_specific_h2_b'] = np.array(jacks['specific_h2_b'])  # NOTE: tmp
-            p['var_specificity_b'] = (N - 1) * np.var(jacks['specificity_b'])
+            if verbose:
+                p['var_shared_h2_b'] = (N - 1) * np.var(jacks['shared_h2_b'])
+                p['var_specific_h2_b'] = (N - 1) * np.var(jacks['specific_h2_b'])
+                p['var_shared_h2_total'] = (N - 1) * np.var(jacks['shared_h2_total'])
+                p['var_specific_h2_total'] = (N - 1) * np.var(jacks['specific_h2_total'])
+                p['jk_hom_g2_b'] = np.array(jacks['hom_g2_b'])  # NOTE: tmp
+                p['jk_V_b'] = np.array(jacks['V_b'])  # NOTE: tmp
+                p['jk_shared_h2_b'] = np.array(jacks['shared_h2_b'])  # NOTE: tmp
+                p['jk_specific_h2_b'] = np.array(jacks['specific_h2_b'])  # NOTE: tmp
+                p['var_specificity_b'] = (N - 1) * np.var(jacks['specificity_b'])
 
             # h2
             # t = [out['hom_g2']] + np.diag(out['V']).tolist() 
@@ -1445,13 +1448,13 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
     ols_model = sm.OLS(Y.flatten(), X)
     ols_res = ols_model.fit()
     beta = ols_res.params
-    out['beta'] = beta
     out['ct_beta'] = beta[:C]
-    # out['ct_beta2'] = (sla.inv(X.T @ X) @ X.T @ Y.flatten())[:C]  # checked OLS is right
-    if fixed_shared and random_shared:
-        beta, fixed_vars, random_vars = util.cal_variance(beta, P, fixed_covars, out['r2'], random_covars)
-        out['op_fixed_vars'] = fixed_vars
-        out['op_random_vars'] = random_vars
+    if verbose:
+        out['beta'] = beta
+        if fixed_shared and random_shared:
+            beta, fixed_vars, random_vars = util.cal_variance(beta, P, fixed_covars, out['r2'], random_covars)
+            out['op_fixed_vars'] = fixed_vars
+            out['op_random_vars'] = random_vars
     # wald test for ct_beta
     wald_M = []
     for c in range(C-1):
@@ -1460,7 +1463,8 @@ def free_HE(Y: np.ndarray, K: np.ndarray, ctnu: np.ndarray, P: np.ndarray,
         m[C-1] = -1
         wald_M.append(m)
 
-    p['ct_beta'] = ols_res.wald_test(wald_M).pvalue
+    if verbose:
+        p['ct_beta'] = ols_res.wald_test(wald_M).pvalue
     
     return out, p
 

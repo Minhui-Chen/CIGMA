@@ -825,7 +825,7 @@ rule yazar_reml:
 use rule yazar_HE_free_merge as yazar_reml_merge with:
     input:
         out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/reml.batch{i}.npy'
-            for i in range(500)],
+            for i in range(1000)],
             # for i in range(yazar_reml_batches)],
     output:
         out = f'analysis/yazar/{yazar_paramspace.wildcard_pattern}/reml.npy',

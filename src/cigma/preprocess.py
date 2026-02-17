@@ -369,12 +369,12 @@ def pseudobulk(counts: Optional[pd.DataFrame] = None,
 
             ctp = ctp.toarray()
             ctnu = ctnu.toarray()
-            print(ctp[:5, :5], ctp2.toarray()[:5, :5], ctnu[:5, :5], adj_cell_num[:5, 0])
+            # print(ctp[:5, :5], ctp2.toarray()[:5, :5], ctnu[:5, :5], adj_cell_num[:5, 0])
 
         else:
             ctp2 = indicator_inv.T @ (X ** 2)
             ctnu = (ctp2 - ctp ** 2) * (1 / adj_cell_num)
-            print(ctp[:5, :5], ctp2[:5, :5], ctnu[:5, :5], adj_cell_num[0, :5])
+            # print(ctp[:5, :5], ctp2[:5, :5], ctnu[:5, :5], adj_cell_num[0, :5])
 
         if output_expected_ctnu and sim_cell_count is not None:
             log.logger.info('Outputting expected CTNU')
@@ -392,6 +392,9 @@ def pseudobulk(counts: Optional[pd.DataFrame] = None,
 
     # compute cell numbers
     cell_counts = data_grouped['cell'].count().unstack(fill_value=0).astype('int')
+    # sort  
+    cell_counts.index = cell_counts.index.astype(str)
+    cell_counts = cell_counts.sort_index(axis=0)
     if sim_cell_count is not None:
         # update cell numbers
         cell_counts = cell_counts / cell_counts
@@ -617,6 +620,13 @@ def std(ctp: pd.DataFrame, ctnu: pd.DataFrame, P: pd.DataFrame, return_all: bool
             #. ctnu
     """
     genes = ctp.columns.tolist()
+
+    # sanity check that all genes are expressed in all cell types
+    for gene in genes:
+        gene_ctp = ctp[gene].unstack()
+        if (gene_ctp == 0).all(axis=0).any():
+            raise ValueError(f'Gene {gene} is not expressed in cell types {gene_ctp.columns[gene_ctp.eq(0).all(axis=0)].tolist()}!\nCIGMA assumes all genes are expressed in all cell types, please check your data and consider removing genes that are not expressed in some cell types.')
+
 
     op_genes = []
     nu_op_genes = []

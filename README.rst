@@ -33,48 +33,109 @@
 CIGMA
 ======
 
+CIGMA is a Python package for decomposing cell type-shared and cell type-specific genetic effects on gene expression (eQTLs).
+For a full description of the CIGMA model, please refer to the original paper: https://doi.org/??.??????/??????????.
 
-CIMGA is a Python package for the decomposition of cell type-shared and -specific eQTLs using the CIGMA model.
-For a full description of CIGMA, please refer to the original paper: https://doi.org/??.??????/??????????.
-
-This repository contains scripts for data analyses in our paper. `Snakemake files <workflow/rules>`_ contain steps for running CIGMA model on simulated and real data.
-
-.. * Download GWAS data from ... and update the path in the [config](config/config.yaml) file.
-.. * Download LDSC: git clone https://github.com/bulik/ldsc.git
+This repository also contains the `Snakemake workflows <workflow/rules>`_ used for data analyses in our paper, including simulations and real-data applications.
 
 
 Installation
 ============
-The conda env is defined in the `environment.yml <env/environment.yml>`_ file, which includes python v3.11.5 and all required dependencies.
 
-To create the conda environment, run:
+Option 1: Conda environment (recommended)
+------------------------------------------
 
-```bash
-conda env create -n cigma -f env/environment.yml
-conda activate cigma
-```
+The conda environment is defined in `environment.yml <envs/environment.yaml>`_, which includes Python 3.11.5 and all required dependencies:
+
+.. code-block:: bash
+
+   conda env create -n cigma -f envs/environment.yaml
+   conda activate cigma
+
+Option 2: pip install
+---------------------
+
+To install only the CIGMA Python package (should complete within seconds):
+
+.. code-block:: bash
+
+   pip install cigma
+
+Python dependencies are listed in the ``install_requires`` section of `setup.cfg <setup.cfg>`_.
+
+R dependencies (for CIGMA-REML)
+-------------------------------
+
+Running CIGMA-REML requires the following R packages:
+
+.. code-block:: r
+
+   install.packages(c("optparse", "numDeriv", "Matrix"))
 
 
-To install only the CIGMA Python package, run (Installation should complete within a second):
+Testing
+=======
 
-```bash
-pip install cigma
-```
+To verify the installation:
 
-Denpendices of CIGMA are listed in the "install_requires" section of the `setup.cfg <setup.cfg>`_ file.
+.. code-block:: bash
 
-To run the tests, run:
-
-```bash
-python3 tests/test.py
-```
+   python3 tests/test.py
 
 
-.. _pyscaffold-notes:
+Quick start
+===========
+
+CIGMA provides helper functions to generate model input from scRNA-seq data that have undergone quality control and normalization:
+
+.. code-block:: python
+
+   import scanpy as sc
+   import pandas as pd
+   from cigma import preprocess, fit
+
+   # Read scRNA-seq data in h5ad format.
+   # The data contains: a gene expression matrix (cells x genes) and cell metadata
+   # with columns: 'cell' (cell IDs), 'ind' (individual IDs), 'ct' (cell types).
+   ann = sc.read_h5ad(scRNA_h5ad_file)
+
+   # Compute pseudobulk quantities:
+   #   ctp  - cell type-pseudobulk matrix (individual-cell type pairs x genes)
+   #   ctnu - cell-to-cell variation matrix (individual-cell type pairs x genes)
+   #   P    - cell type proportion matrix (individuals x cell types)
+   #   n    - cell count matrix (individuals x cell types)
+   ctp, ctnu, P, n = preprocess.pseudobulk(
+       ann=ann, ind_col='ind', ct_col='ct', cell_col='cell'
+   )
+
+   # Remove genes or cell types to match the requirement of CIGMA that genes are expressed in all cell types.
+   # For example, keep cell types CT1 and CT2 that all genes are expressed in, and remove other cell types.
+   ctp = ctp.loc[ctp.index.get_level_values('ct').isin(['CT1', 'CT2'])]
+   ctnu = ctnu.loc[ctnu.index.get_level_values('ct').isin(['CT1', 'CT2'])]
+   P = P[['CT1', 'CT2']]
+   # n = n.loc[:, ['CT1', 'CT2']]
+
+   # Optional: scale so overall-pseudobulk has mean 0 and variance 1 across individuals.
+   _, _, ctp, ctnu = preprocess.std(ctp, ctnu, P)
+
+   # Fit a single gene with CIGMA-HE
+   gene = 'GENE1'
+   ctp_gene = ctp[gene].unstack().to_numpy()
+   ctnu_gene = ctnu[gene].unstack().to_numpy()
+
+   # Kinship matrix (individuals in same order as ctp/ctnu).
+   # Can be computed from genotype data using GCTA or PLINK.
+   K = pd.read_csv(K_file, index_col=0).to_numpy()
+
+   out, pvalues = fit.free_HE(ctp_gene, K, ctnu_gene, P)
+
 
 Input data
 ==========
-Please check the `test script <tests/test.py>`_ for CIGMA input data and running examples.
+
+See the `test script <tests/test.py>`_ for complete input data examples and usage.
+
+.. _pyscaffold-notes:
 
 Note
 ====
