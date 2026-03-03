@@ -1,4 +1,4 @@
-import time, re, os, logging
+import time, re, os, logging, resource
 import numpy as np, pandas as pd
 
 from cigma import fit, util, log 
@@ -47,6 +47,11 @@ def main():
                                  nrep=2)
 
             outs.append({'gene': key, 'full': full})
+
+    # peak memory of R subprocess (KB on Linux -> MB)
+    peak_rss_mb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024
+    for out in outs:
+        out['peak_rss_mb'] = peak_rss_mb
 
     np.save(snakemake.output.out, outs)
 

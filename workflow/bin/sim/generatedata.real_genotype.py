@@ -147,16 +147,12 @@ def main():
                 add = np.zeros(L)
             else:
                 add = rng.normal(0, math.sqrt(sig_g / L), L)
-                # add = add - np.mean(add)
-                # add = add * math.sqrt(sig_g / L) / np.std(add)
 
             ## CT-specific SNP effect
             if np.all(V == np.zeros_like(V)):
                 H = np.zeros((L, C))
             else:
                 H = rng.multivariate_normal(np.zeros(C), V / L, L)  # of shape SNP x cell type
-                # H = H - np.mean(H, axis=0)  # NOTE: covariance in Full model is not stded
-                # H = (H * np.sqrt(np.diag(V)/L)) / np.std(H, axis=0)
             # data[gene_name]['sig_g'] = np.var(add)
             # data[gene_name]['V'] = np.var(H, axis=0)
 

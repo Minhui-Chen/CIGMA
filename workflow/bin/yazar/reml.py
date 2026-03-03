@@ -1,4 +1,4 @@
-import time, re, os, logging, sys
+import time, re, os, logging, sys, resource
 import numpy as np, pandas as pd
 
 from cigma import fit, util, log 
@@ -87,6 +87,9 @@ def main():
         out['free'] = free
         if len(free_p) != 0:
             out['p'] = {'free': free_p}
+
+        # peak memory of R subprocess (KB on Linux -> MB)
+        out['peak_rss_mb'] = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024
 
         outs.append(out)
         break

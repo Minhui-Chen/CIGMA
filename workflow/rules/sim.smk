@@ -93,7 +93,6 @@ rule sim_HE_benchmark:
     params:
         free_jk = False,
         full = False,
-    benchmark: f"benchmark/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/he.batch{{i}}.benchmark.txt",
     script: '../bin/sim/he.benchmark.py'
 
 
@@ -182,15 +181,16 @@ use rule sim_mergeBatches_HE as sim_mergeBatches_REML with:
 
 
 use rule sim_REML as sim_REML_benchmark with:
+    input:
+        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/sim.batch{{i}}.benchmark.npy',
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{{i}}.benchmark.npy',
-    benchmark: f"benchmark/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{{i}}.benchmark.txt",
 
 
 use rule sim_mergeBatches_HE as sim_mergeBatches_REML_benchmark with:
     input:
         out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/reml.batch{i}.benchmark.npy' 
-                for i in range(config['sim']['batch_no'])],
+                for i in range(config['sim']['replicates'])],
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.reml.benchmark.npy',
 
@@ -325,19 +325,19 @@ use rule sim_agg_he_out as sim_realgeno_agg_he_out with:
         out = 'analysis/sim/{model}/yazarL_{L}/AGG{arg}.he.npy',
 
 
-rule sim_agg_L:
+rule sim_realgeno_agg_L:
     input:
-        out = expand('analysis/sim/free5/yazarL_{L}/AGGss.he.npy', L=[0.1, 0.2, 1, 10, 20, 100]),
+        out = expand('analysis/sim/free5/yazarL_{L}/AGGss.he.npy', L=[0.1, 0.2, 1]),
+        V = 'analysis/sim/free5/AGGss.true_V.npy',
     output:
         out = 'analysis/sim/free5/yazar/AGGss.he.npy',
     params:
-        L = [0.1, 0.2, 1, 10, 20, 100],
+        L = [0.1, 0.2, 1],
     run:
         data = {}
         for L, out in zip(params.L, input.out):
             data[L] = np.load(out, allow_pickle=True).item()
         np.save(output.out, data)
-
 
 
 

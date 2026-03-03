@@ -734,7 +734,10 @@ def ctp_h2_plot(out: dict, ax: plt.Axes, colors: list, labels: list = ['cis', 't
     trans_bio_ct_h2_ci = stats.bootstrap((trans_V, bio_var), func, 
                                         vectorized=False, paired=True, 
                                         random_state=rng).confidence_interval  
-    
+    print('Confidence interval for cis hom h2: ', cis_bio_hom_h2_ci)
+    print('Confidence interval for cis specific h2: ', cis_bio_ct_h2_ci)
+    print('Confidence interval for trans hom h2: ', trans_bio_hom_h2_ci)
+    print('Confidence interval for trans specific h2: ', trans_bio_ct_h2_ci)
 
     # plot
     bottom = np.zeros(2)
@@ -749,7 +752,7 @@ def ctp_h2_plot(out: dict, ax: plt.Axes, colors: list, labels: list = ['cis', 't
         ax.text(0.01, 1.01, 'Negative heritability', ha='left', va='bottom', transform=ax.transAxes)
         return None, None
     
-    ax.bar(labels, values, width, yerr=yerr.T, capsize=5,
+    ax.bar(labels, values, width, yerr=yerr.T, capsize=3, error_kw={'linewidth':.5, 'capthick':.5}, 
         bottom=bottom, color=colors[0], edgecolor='none', label='Shared')
     
     bottom += [cis_bio_hom_h2, trans_bio_hom_h2]
@@ -757,7 +760,7 @@ def ctp_h2_plot(out: dict, ax: plt.Axes, colors: list, labels: list = ['cis', 't
     print(bottom, values)
     ci = np.array([cis_bio_ct_h2_ci, trans_bio_ct_h2_ci])
     yerr = np.abs(ci - values[:, np.newaxis])
-    ax.bar(labels, values, width, yerr=yerr.T, capsize=5,
+    ax.bar(labels, values, width, yerr=yerr.T, capsize=3, error_kw={'linewidth':.5, 'capthick':.5},
             bottom=bottom, color=colors[1], edgecolor='none', label='Specific')
     
     # permutation test for comparing cis vs trans in median(specific h2) / (median(shared h2) + median(specific h2))

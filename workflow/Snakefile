@@ -87,9 +87,7 @@ yazar_paramspace = Paramspace(yazar_params, filename_params="*")
 include: 'rules/common.smk'
 include: 'rules/sim.smk'
 include: 'rules/yazar.smk'
-include: 'rules/yazar.add.smk'
+# include: 'rules/yazar.add.smk'
 include: 'rules/yazar_sim.smk'
 include: 'rules/perez.smk'
-# if os.path.isfile('dev/yazar.smk'):
-#     include: 'dev/yazar.smk'
 

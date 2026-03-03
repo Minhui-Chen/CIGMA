@@ -1,4 +1,4 @@
-import re, os, sys, time
+import re, os, sys, time, resource
 import numpy as np, pandas as pd
 
 from cigma import log, fit
@@ -48,6 +48,10 @@ def main():
         if full:
             full_he = fit.full_HE(Y, K, ctnu, P, fixed_covars=fixed, random_covars=random)
             out['full'] = full_he
+
+        # peak memory (KB on Linux -> convert to MB)
+        peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        out['peak_rss_mb'] = peak_rss_mb
 
         # save
         outs.append(out)

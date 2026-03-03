@@ -1,4 +1,4 @@
-import re, os, sys, time
+import re, os, sys, time, resource
 import numpy as np, pandas as pd
 from cigma import log, fit, util
 
@@ -183,7 +183,12 @@ def main():
             full_he = fit.full_HE(ctp, K, ctnu, P, fixed_covars, random_covars, dtype='float32')
             out['full'] = full_he
 
+        # peak memory (KB on Linux -> convert to MB)
+        peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        out['peak_rss_mb'] = peak_rss_mb
+
         outs.append(out)
+        break
 
     np.save(snakemake.output.out, outs)
 

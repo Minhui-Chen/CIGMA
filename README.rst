@@ -113,11 +113,11 @@ CIGMA provides helper functions to generate model input from scRNA-seq data that
    # )
 
    # Remove genes or cell types to match the requirement of CIGMA that genes are expressed in all cell types.
-   # For example, keep cell types CT1 and CT2 that all genes are expressed in, and remove other cell types.
-   ctp = ctp.loc[ctp.index.get_level_values('ct').isin(['CT1', 'CT2'])]
-   ctnu = ctnu.loc[ctnu.index.get_level_values('ct').isin(['CT1', 'CT2'])]
-   P = P[['CT1', 'CT2']]
-   # n = n.loc[:, ['CT1', 'CT2']]
+   # For example, keep cell types CT1, CT2, and CT3 that all genes are expressed in, and remove other cell types.
+   ctp = ctp.loc[ctp.index.get_level_values('ct').isin(['CT1', 'CT2', 'CT3'])]
+   ctnu = ctnu.loc[ctnu.index.get_level_values('ct').isin(['CT1', 'CT2', 'CT3'])]
+   P = P[['CT1', 'CT2', 'CT3']]
+   # n = n.loc[:, ['CT1', 'CT2', 'CT3']]
 
    # Optional: scale so overall-pseudobulk has mean 0 and variance 1 across individuals.
    _, _, ctp, ctnu = preprocess.std(ctp, ctnu, P)
