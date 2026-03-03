@@ -137,7 +137,7 @@ CIGMA provides helper functions to generate model input from scRNA-seq data that
 Input data
 ==========
 
-See the `test script <src/cugna/tests/test.py>`_ for complete input data examples and usage.
+See the `test script <src/cigma/tests/test.py>`_ for complete input data examples and usage.
 
 .. _pyscaffold-notes:
 
