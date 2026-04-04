@@ -1,6 +1,6 @@
 """
     Setup file for CIGMA.
-    Use setup.cfg to configure your project.
+    Use setup.cfg to configure your project. 
 
     This file was generated with PyScaffold 4.4.
     PyScaffold helps you to put up the scaffold of your new Python project.
