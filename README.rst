@@ -34,7 +34,8 @@ CIGMA
 ======
 
 CIGMA is a Python package for decomposing cell type-shared and cell type-specific genetic effects on gene expression (eQTLs).
-For a full description of the CIGMA model, please refer to the original paper: https://doi.org/??.??????/??????????.
+For a full description of the CIGMA model, please refer to the original paper. 
+.. : https://doi.org/??.??????/??????????.
 
 This repository also contains the `Snakemake workflows <workflow/rules>`_ used for data analyses in our paper, including simulations and real-data applications.
 
