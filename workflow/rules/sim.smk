@@ -658,25 +658,6 @@ use rule sim_mergeBatches_HE as sim_gcta_greml_ctp_merge with:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/greml.npy',
 
 
-# TODO: temp
-use rule sim_gcta_greml_ctp as sim_gcta_greml_ctp_ld with:
-    input:
-        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim.batch{{i}}.npy',
-    output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/greml.batch{{i}}.npy',
-    resources:
-        mem_mb = lambda wildcards: '2G' if int(wildcards.ss) <= 2000 else '4G',
-        partition = config['partition1'],
-
-
-use rule sim_mergeBatches_HE as sim_gcta_greml_ctp_ld_merge with:
-    input:
-        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/greml.batch{i}.npy'
-                for i in range(config['sim']['batch_no'])],
-    output:
-        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/greml.npy',
-
-
 def sim_agg_greml_out_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('staging/sim/{{model}}/{params}/L_{{L}}_nL_{{nL}}/greml.npy', params=subspace.instance_patterns)
@@ -847,24 +828,6 @@ use rule sim_mergeBatches_HE as sim_bolt_ctp_merge with:
                 for i in range(config['sim']['batch_no'])],
     output:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/bolt.npy',
-
-# TODO: temp
-use rule sim_bolt_ctp as sim_bolt_ctp_ld with:
-    input:
-        data = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/sim.batch{{i}}.npy',
-    output:
-        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/bolt.batch{{i}}.npy',
-    resources:
-        mem_mb = lambda wildcards: '2G' if int(wildcards.ss) <= 2000 else '4G',
-        partition = config['partition1'],
-
-
-use rule sim_mergeBatches_HE as sim_bolt_ctp_ld_merge with:
-    input:
-        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/bolt.batch{i}.npy'
-                for i in range(config['sim']['batch_no'])],
-    output:
-        out = f'analysis/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/ld{{ld}}/bolt.npy',
 
 
 def sim_agg_bolt_out_subspace(wildcards):

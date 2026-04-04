@@ -2,6 +2,28 @@ import sys, os, re, tempfile, shutil
 import numpy as np, pandas as pd
 from cigma import util
 
+def check_convergence(log_f):
+    lines = open(log_f, 'r').readlines()
+    for i in range(len(lines)):
+        if "Iter.\tlogL\tV(G)\tV(e)" in lines[i]:
+            break  # Stop checking after iterations start
+    if i == len(lines) - 1:
+        sys.exit("Error: Iteration log not found in GCTA output.")
+    k = 0
+    for j in range(i+1, len(lines)):
+        line = lines[j].strip().split()
+        if line[0].isdigit():
+            new_k = int(line[0])
+            if new_k != k + 1:
+                sys.exit(f"Error: Iteration numbers are not consecutive at line {j}: {line}")
+            k = new_k
+        elif "Log-likelihood ratio converged." in lines[j]:
+            print(f"Log-likelihood ratio converged at iteration {k}.")
+            break
+        else:
+            sys.exit(f"Error: Unexpected line format at line {j}: {line}")
+    return k
+
 def main():
     # read
     P = pd.read_table(sys.argv[1], index_col=0)
@@ -116,6 +138,8 @@ def main():
                     # '--mgrm', mgrm_f,
             # try:
             util.subprocess_popen( cmd2 )
+            k = check_convergence(os.path.splitext(gene_out_f)[0] + '.log')
+
             # except:
             #     sig = 0
             #     for i in range(10):

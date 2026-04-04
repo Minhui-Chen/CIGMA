@@ -55,7 +55,7 @@ The conda environment is defined in `environment.yml <envs/environment.yaml>`_, 
 Option 2: pip install
 ---------------------
 
-To install only the CIGMA Python package (should complete within seconds):
+To install only the CIGMA Python package (should complete within seconds; have tested on Python 3.11 - 3.14):
 
 .. code-block:: bash
 

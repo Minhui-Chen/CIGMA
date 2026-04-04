@@ -3,6 +3,29 @@ import sys, os, re, tempfile
 import numpy as np, pandas as pd
 from cigma import util
 
+
+def check_convergence(log_f):
+    lines = open(log_f, 'r').readlines()
+    for i in range(len(lines)):
+        if "Iter.\tlogL\tV(G)\tV(e)" in lines[i]:
+            break  # Stop checking after iterations start
+    if i == len(lines) - 1:
+        sys.exit("Error: Iteration log not found in GCTA output.")
+    k = 0
+    for j in range(i+1, len(lines)):
+        line = lines[j].strip().split()
+        if line[0].isdigit():
+            new_k = int(line[0])
+            if new_k != k + 1:
+                sys.exit(f"Error: Iteration numbers are not consecutive at line {j}: {line}")
+            k = new_k
+        elif "Log-likelihood ratio converged." in lines[j]:
+            break
+        else:
+            sys.exit(f"Error: Unexpected line format at line {j}: {line}")
+    return k
+
+
 def main():
     #
     data = np.load(sys.argv[1], allow_pickle=True).item()
@@ -38,8 +61,10 @@ def main():
 
             # run GCTA
             util.subprocess_popen( cmd2 )
+            k = check_convergence(prefix + '.log')
 
             greml = util.read_greml(prefix + '.hsq')
+            greml['converged'] = "Log-likelihood ratio converged at iteration " + str(k)
             gremls.append(greml)
         
         # merge into one dict
@@ -56,6 +81,8 @@ def main():
         np.savetxt(qcovar_f, qcovar, fmt='%s', delimiter='\t')
         util.subprocess_popen( cmd2 + ['--qcovar', qcovar_f] )
         greml_op = util.read_greml(prefix + '.hsq')
+        k = check_convergence(prefix + '.log')
+        greml_op['converged'] = "Log-likelihood ratio converged at iteration " + str(k)
 
 
         # save
