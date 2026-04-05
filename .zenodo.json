@@ -1,0 +1,19 @@
+{
+  "title": "Cell type-specific eQTLs underlie the genetic architecture of complex traits",
+  "description": "Research code for the study of cell type-specific eQTLs and their role in the genetic architecture of complex traits.",
+  "creators": [
+    {
+      "name": "Chen, Minhui"
+    }
+  ],
+  "license": "GPL-3.0",
+  "upload_type": "software",
+  "access_right": "open",
+  "keywords": [
+    "eQTL",
+    "cell type",
+    "complex traits",
+    "genetics",
+    "genomics"
+  ]
+}
