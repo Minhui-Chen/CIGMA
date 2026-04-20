@@ -38,7 +38,7 @@ def main():
     # beta
     ## par
     beta = np.array( [float(x) for x in snakemake.wildcards.beta.split('_')] )
-    ct_fixed_vc = float(snakemake.wildcards.vc.split('_')[0]), # variance explained by ct fixed effect \beta^T S \beta
+    ct_fixed_vc = float(snakemake.wildcards.vc.split('_')[0])  # variance explained by ct fixed effect \beta^T S \beta
 
     ## calculate beta based on \beta^T S \beta = 0.25
     ## \beta^2 [1 1/2 1/4 1/8] cov [1 1/2 1/4 1/8]^T = 0.25
