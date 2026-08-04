@@ -1,0 +1,99 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{hyperref}
+
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\proj}{\mathrm{proj}}
+\newcommand{\kron}{\mathrm{kron}}
+\newcommand{\Ainv}{A_{\mathrm{inv}}}
+\newcommand{\Pmat}{\mathrm{Pmat}}
+\newcommand{\qed}{\hfill$\blacksquare$}
+
+\title{Matrix-free reduction of the HE-regression normal equations}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Notation and standing assumptions}
+
+\begin{itemize}
+  \item $N$ individuals, $C$ cell types, $p$ fixed-effect columns; $X \in \mathbb{R}^{(NC)\times p}$ has full column rank $p$.
+  \item Row indexing is \emph{individual-major}: row $\overline{nc} := nC+c$ corresponds to individual $n$, cell type $c$. Write $X_{:,c,:}$ for the $N\times p$ submatrix of rows with cell-type index $c$.
+  \item $\Ainv := (X^\top X)^{-1}$, $\quad H := X\Ainv X^\top$, $\quad \proj := I_{NC} - H$.
+  \item For symmetric $M \in \mathbb{R}^{N\times N}$ and symmetric $F \in \mathbb{R}^{C\times C}$: $Q(M,F) := \proj\,\kron(M,F)\,\proj$.
+  \item Frobenius inner product: $\langle U,V\rangle_F := \tr(U^\top V)$.
+\end{itemize}
+
+
+\section*{Lemma 1 (structure identity)}
+
+For any $M\in\mathbb{R}^{N\times N}$, $F\in\mathbb{R}^{C\times C}$:
+\begin{equation}
+X^\top\,\kron(M,F)\,X \;=\; \sum_{c,d} F[c,d]\cdot\big(X_{:,c,:}^\top\, M\, X_{:,d,:}\big) \;=:\; \Pmat_M(F).
+\label{eq:lemma1}
+\end{equation}
+
+\textit{Proof.} By definition of the Kronecker product under individual-major indexing,
+$\kron(M,F)[\overline{nc},\overline{md}] = M[n,m]\,F[c,d]$. Expanding the matrix product entrywise, for $q,r \in \{1,\dots,p\}$:
+\[
+(\kron(M,F)X)[\overline{nc},r] = \sum_{m,d} M[n,m]\,F[c,d]\,X[\overline{md},r],
+\]
+so
+\[
+(X^\top\kron(M,F)X)[q,r] = \sum_{n,c} X[\overline{nc},q]\sum_{m,d}M[n,m]F[c,d]X[\overline{md},r]
+= \sum_{c,d}F[c,d]\sum_{n,m}X[\overline{nc},q]\,M[n,m]\,X[\overline{md},r],
+\]
+and the innermost double sum is exactly the $(q,r)$ entry of $X_{:,c,:}^\top M X_{:,d,:}$. This holds for every $q,r$, proving \eqref{eq:lemma1} as a matrix identity.
+\qed
+
+\section*{Theorem 1 (QQ reduction)}
+
+For symmetric $A,B \in \mathbb{R}^{N\times N}$ and symmetric $F,G \in \mathbb{R}^{C\times C}$:
+\begin{align}
+\langle Q(A,F),Q(B,G)\rangle_F \;=\; & \tr(\proj\,\kron(A,F)\,\proj\,\kron(B,G)) \nonumber\\
+ &= \tr\big((I - H)\,\kron(A,F)\,(I - H)\,\kron(B,G)\big) \nonumber \\
+ &= \tr\big((\kron(A,F) - H\kron(A,F))\,(\kron(B,G) - H\kron(B,G))\big) \nonumber \\
+ &= \tr(\kron(A,F)\kron(B,G)) - 2\,\tr(H\kron(A,F)\kron(B,G)) \nonumber \\
+ & \qquad + \tr(H\kron(A,F)\,H\kron(B,G)) \nonumber \\
+ &= \tr(AB)\,\tr(FG) \nonumber\\
+ & - 2 \tr\big(\Ainv\,\Pmat_{AB}(FG)\big) \nonumber\\
+ & + \tr\big(\Ainv\,\Pmat_A(F)\,\Ainv\,\Pmat_B(G)\big).
+\label{eq:theorem1}
+\end{align}
+
+
+
+\section*{Theorem 2 (target-term reduction)}
+
+Let $D = \mathrm{diag}(\mathrm{vec}(\mathrm{ctnu}))$, $y_p = \proj\,y$, $Y_p$ its $N\times C$ reshape, and
+\[
+t \;:=\; y_p y_p^\top - \proj\,D\,\proj.
+\]
+Then $\langle Q(A,F), t\rangle_F = \text{(i)} - \text{(ii)}$, where:
+
+\textbf{(i)}
+\begin{equation}
+\langle Q(A,F), y_p y_p^\top\rangle_F = \sum_{c,d} F[c,d]\cdot\big(Y_{p,:,c}^\top A\, Y_{p,:,d}\big).
+\label{eq:term1}
+\end{equation}
+
+\qed
+
+\textbf{(ii)}
+\begin{align}
+\langle Q(A,F), \proj\,D\,\proj\rangle_F &= \tr(Q(A,F) \proj\,D\,\proj) \nonumber\\
+&= \tr(M \proj\,D\,\proj), \qquad M := \kron(A,F), \nonumber\\
+&= \tr(M (I - H) D (I - H)) \nonumber\\
+&= \tr(DM) - 2\,\tr(HDM) + \tr(HDHM) \nonumber\\
+&= \tr(DM) - 2 \tr\big(\Ainv\,[X^\top D M X]\big) + \tr(\Ainv\,X^\top D X \Ainv X^\top M X).
+\label{eq:term2}
+\end{align}
+
+
+\qed
+
+\end{document}

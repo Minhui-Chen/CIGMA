@@ -1451,7 +1451,7 @@ def construct_design(inds: list, pca: Optional[pd.DataFrame] = None, PC: Optiona
 
 def L_f(C: int, c1: int, c2: int) -> np.ndarray:
     # to build L matrix of 0 and 1
-    L = np.zeros((C, C), dtype='int8')
+    L = np.zeros((C, C))
     L[c1, c2] = 1
     return L
 

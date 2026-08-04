@@ -328,11 +328,16 @@ def _pMp(X:np.ndarray, X_inv: np.ndarray, A:np.ndarray, B:np.ndarray) -> np.ndar
     return M
 
 
-def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
-           model: str, random_covars: dict={}, Kt:Optional[np.ndarray] = None, 
+def he_ols_dense(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
+           model: str, random_covars: dict={}, Kt:Optional[np.ndarray] = None,
            random_shared:bool = True, dtype:Optional[str] = None) -> np.ndarray:
     """
-    Perform OLS in HE
+    Perform OLS in HE.
+
+    Reference/fallback implementation: builds an explicit (N*C) x (N*C) matrix per basis
+    direction via np.kron. he_ols (the default) is a matrix-free rewrite of this exact
+    algorithm that never materializes an (N*C)x(N*C) matrix, and is preferred for actual
+    use; this dense version is kept only for cross-checking against he_ols on new inputs.
 
     Parameters:
         Y:  N * C matrix of Cell Type-specific Pseudobulk
@@ -483,6 +488,286 @@ def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
     if isinstance(Q, np.memmap):
         del Q
         os.remove(tmpfn)
+
+    return theta
+
+
+def _mf_factor_apply(factor, blocks: np.ndarray) -> np.ndarray:
+    """
+    factor @ blocks[:,c,:] for each c, where blocks is (N,C,p): 
+    Apply an N-side factor to a (N,C,p)-shaped block array along the N axis, without ever
+    materializing an (N*C)x(N*C) matrix.
+
+    factor: None (= I_N, no-op), a dense (N,N) ndarray (e.g. K, Kt), or a
+            ('lr', R) tuple meaning the low-rank Gram matrix R @ R.T (R: N x k, e.g. an
+            extra random effect's design matrix) -- applied as R @ (R.T @ blocks), O(N*k)
+            instead of O(N^2).
+    """
+    if factor is None:
+        return blocks
+    N, C, p = blocks.shape
+    flat = blocks.reshape(N, -1)
+    if isinstance(factor, tuple):
+        R = factor[1]
+        return (R @ (R.T @ flat)).reshape(N, C, p)
+    return (factor @ flat).reshape(N, C, p)
+
+
+def _mf_trace_single(factor, N: int) -> float:
+    """tr(factor), handling the None (=I_N) and ('lr', R) (=R @ R.T) cases without forming
+    the N x N matrix."""
+    if factor is None:
+        return float(N)
+    if isinstance(factor, tuple):
+        R = factor[1]
+        return float(np.sum(R * R))
+    return float(np.trace(factor))
+
+
+def _mf_trace_product(Ai, Aj, N: int) -> float:
+    """tr(Ai @ Aj) for Ai, Aj each None (=I_N), dense, or ('lr', R) (=R @ R.T)."""
+    if Ai is None and Aj is None:
+        return float(N)
+    if Ai is None:
+        return _mf_trace_single(Aj, N)
+    if Aj is None:
+        return _mf_trace_single(Ai, N)
+    if isinstance(Ai, tuple) and isinstance(Aj, tuple):
+        Ri, Rj = Ai[1], Aj[1]
+        return float(np.sum((Ri.T @ Rj) ** 2))
+    if isinstance(Ai, tuple):
+        Ri = Ai[1]
+        return float(np.sum(Ri * (Aj @ Ri)))
+    if isinstance(Aj, tuple):
+        return _mf_trace_product(Aj, Ai, N)
+    return float(np.sum(Ai * Aj))  # tr(Ai@Aj) via elementwise sum, valid since both symmetric
+
+
+def he_ols(Y: np.ndarray, K: np.ndarray, X: np.ndarray, ctnu: np.ndarray,
+           model: str, random_covars: dict={}, Kt:Optional[np.ndarray] = None,
+           random_shared:bool = True, dtype:Optional[str] = None) -> np.ndarray:
+    """
+    Perform OLS in HE. Matrix-free: no (N*C) x (N*C) matrix is ever built.
+
+    he_ols_dense's setup builds an explicit (N*C)x(N*C) matrix per basis direction
+    (O(N^2*C^2) each, O(n_Q) of them held simultaneously) and its QTQ/QTt assembly costs
+    O(n_Q^2*(N*C)^2). This function reduces that to O(n_factors*N^2*C*p) -- where
+    n_factors is the small, fixed number of distinct N-side relatedness factors in play
+    (K, Kt, I_N, plus one low-rank R per random_covars key), independent of how many
+    Sigma-side variance parameters (n_Q, which grows with C) are being fit -- by reducing
+    every Frobenius inner product <Q_i, Q_j>_F and <Q_i, t>_F needed for the OLS normal
+    equations to a small number of (C,C,p,p)-shaped tensor contractions, built by applying
+    each distinct factor to X's C columns once (O(N^2*p) per factor) rather than forming
+    kron(factor, F) (O(N^2*C^2)) once per parameter.
+
+    Parameters:
+        Y:  N * C matrix of Cell Type-specific Pseudobulk
+        K:  kinship matrix
+        X:  design matrix for fixed effects
+        ctnu: cell type-specific noise variance
+        model:  iid / free / full
+        random_covars:  design matrices for Extra random effects
+        Kt: kinship matrix for trans-eQTLs (currently only for iid/Free model)
+        random_shared: whether Extra random effects are shared across cell types
+        dtype:  unused
+    Returns:
+        OLS estimates, in the same parameter order as he_ols_dense
+    """
+
+    N, C = Y.shape
+    p = X.shape[1]
+    y = Y.flatten()
+    vs = ctnu
+
+    Ainv = sla.inv(X.T @ X)
+    X_blocks = X.reshape(N, C, p)
+    y_p = y - X @ (Ainv @ (X.T @ y))
+    Y_p = y_p.reshape(N, C)
+
+    # ---- ordered list of (factor, F) Sigma-side basis terms, matching he_ols_dense's Q order ----
+    ones_C = np.ones((C, C))
+    eye_C = np.eye(C)
+    terms = []
+
+    if model == 'iid':
+        terms.append((K, ones_C))
+        if Kt is not None:
+            terms.append((Kt, ones_C))
+        terms.append((None, ones_C))
+        terms.append((K, eye_C))
+        if Kt is not None:
+            terms.append((Kt, eye_C))
+        terms.append((None, eye_C))
+    elif model == 'free':
+        terms.append((K, ones_C))
+        if Kt is not None:
+            terms.append((Kt, ones_C))
+        terms.append((None, ones_C))
+        for c in range(C):
+            terms.append((K, util.L_f(C, c, c)))
+        if Kt is not None:
+            for c in range(C):
+                terms.append((Kt, util.L_f(C, c, c)))
+        for c in range(C):
+            terms.append((None, util.L_f(C, c, c)))
+    elif model == 'full':
+        for c in range(C):
+            terms.append((K, util.L_f(C, c, c)))
+        for c in range(C):
+            terms.append((None, util.L_f(C, c, c)))
+        for i in range(C - 1):
+            for j in range(i + 1, C):
+                L = util.L_f(C, i, j) + util.L_f(C, j, i)
+                terms.append((K, L))
+        for i in range(C - 1):
+            for j in range(i + 1, C):
+                L = util.L_f(C, i, j) + util.L_f(C, j, i)
+                terms.append((None, L))
+    else:
+        raise ValueError(f'model {model} not supported by matrix-free he_ols')
+
+    for key in sorted(random_covars.keys()):
+        Z = random_covars[key]
+        lr = ('lr', Z)
+        if random_shared:
+            terms.append((lr, ones_C))
+        else:
+            for c in range(C):
+                terms.append((lr, util.L_f(C, c, c)))
+
+    n_terms = len(terms)
+
+    # ---- t-target machinery shared across all terms (D-weighted quadratic form) ----
+    # R_mat = X^T D X (D := diag(vec(ctnu)))
+    R_mat = np.zeros((p, p))
+    for c in range(C):
+        Xc = X_blocks[:, c, :]
+        R_mat += Xc.T @ (vs[:, c][:, None] * Xc)
+
+    # ---- caches: the same factor (e.g. K) is reused across many terms (V_1..V_C all use K) ----
+    def _fkey(factor):
+        """
+        Hashable cache key identifying a factor by object identity, not value: numpy arrays
+        aren't hashable so can't be dict keys directly, and id() lets repeated uses of the
+        *same* K/Kt/R object hit the cache.
+        """
+        if factor is None:
+            return ('I',)
+        if isinstance(factor, tuple):
+            return ('lr', id(factor[1]))
+        return ('dense', id(factor))
+
+    _ax_cache, _single_pmat_cache, _ay_cache, _diag_cache = {}, {}, {}, {}
+
+    def get_AX(factor):
+        """
+        Cached $ factor @ X_blocks[:,c,:] $ for every c at once, i.e. kron(factor,I_C)@X as an
+        (N,C,p) tensor -- computed once per distinct factor and reused by every term that
+        shares it (e.g. all V_c terms share factor=K).
+        """
+        key = _fkey(factor)
+        if key not in _ax_cache:
+            _ax_cache[key] = _mf_factor_apply(factor, X_blocks)
+        return _ax_cache[key]
+
+    def get_single_pmat(factor):
+        """
+        Cached (C,C,p,p) tensor Pmat_factor[c,d] = X_blocks[:,c,:].T @ factor @ X_blocks[:,d,:]
+        -- Lemma 1's Pmat_M(F), before contracting with any particular F. Contracting this
+        against a C,C basis F (via einsum('cd,cdpq->pq', F, Pmat)) gives X^T kron(factor,F) X
+        without ever forming kron(factor,F).
+        """
+        key = _fkey(factor)
+        if key not in _single_pmat_cache:
+            AX = get_AX(factor)
+            _single_pmat_cache[key] = np.einsum('ncp,ndq->cdpq', X_blocks, AX)
+        return _single_pmat_cache[key]
+
+    def get_AY(factor):
+        key = _fkey(factor)
+        if key not in _ay_cache:
+            if factor is None:
+                _ay_cache[key] = Y_p
+            elif isinstance(factor, tuple):
+                R = factor[1]
+                _ay_cache[key] = R @ (R.T @ Y_p)
+            else:
+                _ay_cache[key] = factor @ Y_p
+        return _ay_cache[key]
+
+    def get_diag(factor):
+        key = _fkey(factor)
+        if key not in _diag_cache:
+            if factor is None:
+                _diag_cache[key] = np.ones(N)
+            elif isinstance(factor, tuple):
+                R = factor[1]
+                _diag_cache[key] = np.sum(R * R, axis=1)
+            else:
+                _diag_cache[key] = np.diag(factor)
+        return _diag_cache[key]
+
+    _pair_pmat_cache = {}
+
+    def get_pair_pmat(Ai, Aj):
+        key = (_fkey(Ai), _fkey(Aj))
+        if key not in _pair_pmat_cache:
+            ABX = _mf_factor_apply(Aj, X_blocks)
+            ABX = _mf_factor_apply(Ai, ABX)
+            _pair_pmat_cache[key] = np.einsum('ncp,ndq->cdpq', X_blocks, ABX)
+        return _pair_pmat_cache[key]
+
+    # Si_all[i] = X^T kron(Ai,Fi) X (Lemma 1's Pmat_M(F), M=Ai, F=Fi, for term i's own factor/basis pair)
+    Si_all = []
+    for Ai, Fi in terms:
+        Pmat_i = get_single_pmat(Ai)
+        Si_all.append(np.einsum('cd,cdpq->pq', Fi, Pmat_i))
+
+    QTQ = np.zeros((n_terms, n_terms))
+    QTt = np.zeros(n_terms)
+
+    for i in range(n_terms):
+        Ai, Fi = terms[i]
+
+        # QTt[i] = <Q(Ai,Fi), y_p y_p^T>_F - <Q(Ai,Fi), proj@D@proj>_F
+        AYi = get_AY(Ai)
+        term_i = np.einsum('cd,nc,nd->', Fi, Y_p, AYi)
+
+        # term_a := tr(D M) (M := kron(Ai,Fi))
+        diagAi = get_diag(Ai)
+        term_a = np.sum(np.diag(Fi) * (diagAi @ vs))
+
+        # term_b := tr(H D M)
+        AXi = get_AX(Ai)
+        temp_b = np.einsum('cd,ndp->ncp', Fi, AXi)
+        S_b = np.einsum('ncp,ncq->pq', X_blocks, vs[:, :, None] * temp_b)
+        term_b = np.trace(Ainv @ S_b)
+
+        term_c = np.trace(Ainv @ R_mat @ Ainv @ Si_all[i])
+
+        QTt[i] = term_i - (term_a - 2 * term_b + term_c)
+
+        for j in range(i, n_terms):
+            Aj, Fj = terms[j]
+
+            T1 = _mf_trace_product(Ai, Aj, N) * np.trace(Fi @ Fj)
+
+            S2 = np.einsum('cd,cdpq->pq', Fi @ Fj, get_pair_pmat(Ai, Aj))
+            T2 = np.trace(Ainv @ S2)
+
+            T3 = np.trace(Ainv @ Si_all[i] @ Ainv @ Si_all[j])
+
+            val = T1 - 2 * T2 + T3
+            QTQ[i, j] = val
+            QTQ[j, i] = val
+
+    try:
+        theta = sla.inv(QTQ) @ QTt
+    except np.linalg.LinAlgError as e:
+        print(e)
+        print(QTQ)
+        print(sla.eigh(QTQ, eigvals_only=True))
+        sys.exit(-1)
 
     return theta
 

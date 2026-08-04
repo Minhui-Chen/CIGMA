@@ -3,43 +3,43 @@ from typing import Tuple, Optional, Union
 import re, sys
 import numpy as np, pandas as pd
 from scipy import stats, sparse
-# import pkg_resources
-# import rpy2.robjects as ro
-# from rpy2.robjects import r, pandas2ri, 
-# from rpy2.robjects.packages import STAP
 from anndata import AnnData
 import scanpy as sc
 
 from . import log
 
 
-def normalize(X: sparse.csr_matrix, l=1e6) -> sparse.csr_matrix:
+def normalize(X: Union[sparse.csr_matrix, np.ndarray], l=1e6) -> Union[sparse.csr_matrix, np.ndarray]:
     """
     Normalize read counts to CPM: x/s, where s = total reads / 10^6
 
     Parameters:
-        X:  ann.X (raw read counts)
+        X:  ann.X (raw read counts), sparse or dense
         l:  normalized total counts
 
     Returns:
-        Normalized X
+        Normalized X (sparse input is returned as CSR, dense input as ndarray)
     """
-    s = X.sum(axis=1).A1
-    X = X.multiply(l / s[:, np.newaxis])
-    
+    if sparse.issparse(X):
+        s = X.sum(axis=1).A1
+        X = X.multiply(l / s[:, np.newaxis]).tocsr()
+    else:
+        s = X.sum(axis=1)
+        X = X * (l / s[:, np.newaxis])
+
     return X
 
 
-def transform(X: Optional[sparse.csr_matrix] = None, 
+def transform(X: Optional[Union[sparse.csr_matrix, np.ndarray]] = None,
               transform: str='raw_counts',
-              ann: Optional[AnnData] = None, ) -> sparse.csr_matrix:
+              ann: Optional[AnnData] = None, ) -> Union[sparse.csr_matrix, np.ndarray]:
     """
     Transform read counts
     Check more transformation methods in sc.pp and sc.experimental.pp,
     and https://www.sc-best-practices.org/preprocessing_visualization/normalization.html
 
     Parameters:
-        X:  ann.X (raw read counts), in the shape of cell x gene
+        X:  ann.X (raw read counts), in the shape of cell x gene, sparse or dense
         transform:  transformation methods
                     'raw_counts': no transformation
                     'logp_cpm': ln(CPM + 1)
@@ -59,20 +59,22 @@ def transform(X: Optional[sparse.csr_matrix] = None,
             l = 1e4
             X = normalize(X, l)
             X = np.log1p(X)
- 
+        else:
+            raise ValueError(f"Unknown transform '{transform}'! Supported: 'raw_counts', 'logp_cpm', 'logp_cp10k'.")
+
     elif ann is not None:
-        # NOTE: not finished
         if transform == 'raw_counts':
-            X = ann.X
+            X = ann.X.copy()
         elif transform == 'logp_cpm' or transform == 'logp_cp10k':
             l = 1e6 if transform == 'logp_cpm' else 1e4
             scales_counts = sc.pp.normalize_total(ann, target_sum=l, inplace=False)
-            X = sparse.csr_matrix(sc.pp.log1p(scales_counts["X"], copy=True))
-        elif transform == 'pearson':
-            # NOTE: figure out how to set parameters theta and clip
-            X = sc.experimental.pp.normalize_pearson_residuals(ann, inplace=False)['X']
-            X = sparse.csr_matrix(X)
- 
+            X = sparse.csr_matrix(sc.pp.log1p(scales_counts["X"]))
+        else:
+            raise ValueError(f"Unknown transform '{transform}'! Supported: 'raw_counts', 'logp_cpm', 'logp_cp10k'.")
+
+    else:
+        raise ValueError('Either X or ann must be provided!')
+
     return X
 
 
@@ -419,185 +421,6 @@ def pseudobulk(counts: Optional[pd.DataFrame] = None,
     return (ctp, ctnu, P, cell_counts)
 
 
-# def _softimpute(data: pd.DataFrame, seed: int = None, scale: bool = True) -> pd.DataFrame:
-#     '''
-#     Impute missing ctp or ct-specific noise variance (ctnu)
-
-#     Parameters:
-#         data:   ctp or ctnu of shape index: ind * columns: (genes, cts) (or cts when impute for one gene)
-#         seed:   seed for softImpute, only needed to be replicate imputation
-#         scale:  scale before imputation
-#     Results:
-#         imputed dataset
-#     '''
-#     # load softImpute r package
-#     is_sourced = r("exists('my_softImpute')")[0]
-#     if not is_sourced:
-#         rf = pkg_resources.resource_filename(__name__, 'softImpute.R')
-#         softImpute = STAP(open(rf).read(), 'softImpute')
-
-#     if seed is None:
-#         seed = ro.NULL
-
-#     # Impute
-#     pandas2ri.activate()
-#     if scale:
-#         out = softImpute.my_softImpute(r['as.matrix'](data), scale=ro.vectors.BoolVector([True]), seed=seed)
-#     else:
-#         out = softImpute.my_softImpute(r['as.matrix'](data), seed=seed)
-#     out = dict(zip(out.names, list(out)))
-#     out = pd.DataFrame(out['Y'], index=data.index, columns=data.columns)
-#     pandas2ri.deactivate()
-
-#     return (out)
-
-
-# def softimpute(data: pd.DataFrame, seed: int = None, scale: bool = True,
-#                per_gene: bool = False) -> pd.DataFrame:
-#     '''
-#     Impute missing ctp or ct-specific noise variance (ctnu)
-
-#     Parameters:
-#         data:   ctp or ctnu of shape index: (ind, ct) * columns: genes
-#         seed:   seed for softImpute, only needed to be replicate imputation
-#         scale:  scale before imputation
-#         per_gene:   perform imputation per gene
-#     Results:
-#         imputed dataset
-#     '''
-#     if not per_gene:
-#         # transform to index: ind * columns: (genes: cts)
-#         data = data.unstack()
-
-#         # impute
-#         imputed = _softimpute(data, seed, scale)
-
-#         # transform back
-#         imputed = imputed.stack()
-#     else:
-#         imputed = []
-#         for i, gene in enumerate(data.columns):
-#             if i % 100 == 0:
-#                 log.logger.info(f'SoftImpute imputing {gene}')
-
-#             # transform to index: ind * columns: (cts)
-#             Y = data[gene].unstack()
-
-#             # Impute
-#             out = _softimpute(Y)
-
-#             # transform back
-#             out = out.stack()
-#             out.name = gene
-
-#             imputed.append(out)
-
-#         imputed = pd.concat(imputed, axis=1)
-
-#     return (imputed)
-
-
-# def _mvn(data: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Impute missing ctp or ctnu
-
-#     Parameters:
-#         data:   ctp or ctnu of shape index: ind * columns: ct
-#     Results:
-#         imputed dataset
-#     """
-
-#     # load MVN r package
-#     is_sourced = r("exists('MVN_impute')")[0]
-#     if not is_sourced:
-#         rf = pkg_resources.resource_filename(__name__, 'mvn.R')
-#         mvn_r = STAP(open(rf).read(), 'mvn_r')
-#     pandas2ri.activate()
-
-#     # impute
-#     out = mvn_r.MVN_impute(r['as.matrix'](data))
-#     out = dict(zip(out.names, list(out)))
-#     out = pd.DataFrame(out['Y'], index=data.index, columns=data.columns)
-
-#     pandas2ri.deactivate()
-
-#     return out
-
-
-# def mvn(data: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Impute missing ctp or ctnu
-
-#     Parameters:
-#         data:   ctp or ctnu of shape index: (ind, ct) * columns: genes
-#     Results:
-#         imputed dataset
-#     """
-
-#     imputed = []
-#     for i, gene in enumerate(data.columns):
-#         if i % 100 == 0:
-#             log.logger.info(f'MVN imputing {gene}')
-
-#         # transform to index: ind * columns: (cts)
-#         Y = data[gene].unstack()
-
-#         # Impute
-#         out = _mvn(Y)
-
-#         # transform back
-#         out = out.stack()
-#         out.name = gene
-
-#         imputed.append(out)
-
-#     imputed = pd.concat(imputed, axis=1)
-
-#     return imputed
-
-
-def _std(ctp: pd.DataFrame, ctnu: pd.DataFrame, P: pd.DataFrame
-         ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    For each Gene, stardardize Overall Pseudobulk (OP) to mean 0 and std 1, and scale ctp,
-    overall noise variance (nu), ct-specific noise variance (ctnu) correspondingly.
-
-    Parameters:
-        ctp:    imputed ctp for each gene with shape index: ind * ct
-        ctnu:   imputed ctnu for each gene with shape index: ind * ct
-        P:  cell type proportions matrix of shape ind * ct
-    Returns:
-        A tuple of
-            #. op
-            #. nu_op: negative ctnu set to 0
-            #. ctnu_op: negative ctnu set to 0
-            #. ctp
-            #. nu_ctp: negative ctnu set to max
-            #. ctnu_ctp: negative ctnu set to max
-    """
-
-    # compute op and nu
-    op = (ctp * P).sum(axis=1)
-    ctnu_op = ctnu.mask(ctnu < 0, 0)  # set negative ctnu to 0 for OP data
-    nu_op = (ctnu_op * (P ** 2)).sum(axis=1)
-
-    # set negative ctnu to max for CTP data
-    ctnu_ctp = ctnu.mask(ctnu < 0, ctnu.max(), axis=1)
-    nu_ctp = (ctnu_ctp * (P ** 2)).sum(axis=1)
-
-    # standardize op
-    mean, std, var = op.mean(), op.std(), op.var()
-
-    op = (op - mean) / std
-    ctp = (ctp - mean) / std
-    nu_op = nu_op / var
-    nu_ctp = nu_ctp / var
-    ctnu_op = ctnu_op / var
-    ctnu_ctp = ctnu_ctp / var
-
-    return op, nu_op, ctnu_op, ctp, nu_ctp, ctnu_ctp
-
-
 def std(ctp: pd.DataFrame, ctnu: pd.DataFrame, P: pd.DataFrame, return_all: bool = False
         ) -> Union[Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame], 
                    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
@@ -621,66 +444,48 @@ def std(ctp: pd.DataFrame, ctnu: pd.DataFrame, P: pd.DataFrame, return_all: bool
     """
     genes = ctp.columns.tolist()
 
-    # sanity check that all genes are expressed in all cell types
-    for gene in genes:
-        gene_ctp = ctp[gene].unstack()
-        if (gene_ctp == 0).all(axis=0).any():
-            raise ValueError(f'Gene {gene} is not expressed in cell types {gene_ctp.columns[gene_ctp.eq(0).all(axis=0)].tolist()}!\nCIGMA assumes all genes are expressed in all cell types, please check your data and consider removing genes that are not expressed in some cell types.')
+    # sanity check that all genes are expressed in all cell types (vectorized across all genes)
+    all_zero_by_ct = (ctp == 0).groupby(level='ct').transform('all')
+    if all_zero_by_ct.any().any():
+        bad_genes = all_zero_by_ct.columns[all_zero_by_ct.any(axis=0)]
+        for gene in bad_genes:
+            bad_cts = all_zero_by_ct.index.get_level_values('ct')[all_zero_by_ct[gene]].unique().tolist()
+            raise ValueError(f'Gene {gene} is not expressed in cell types {bad_cts}!\nCIGMA assumes all genes are expressed in all cell types, please check your data and consider removing genes that are not expressed in some cell types.')
 
-
-    op_genes = []
-    nu_op_genes = []
-    ctnu_op_genes = []
-    ctp_genes = []
-    nu_ctp_genes = []
-    ctnu_ctp_genes = []
-    # sanity check order of inds and cts in ctp, ctnu, and P
+    # sanity check order of inds and cts in ctp, ctnu, and P (checked once, not per gene)
     inds = P.index
     cts = P.columns
+    gene0_ctp = ctp[genes[0]].unstack()
+    gene0_ctnu = ctnu[genes[0]].unstack()
+    if not (gene0_ctnu.index.equals(inds) and gene0_ctp.index.equals(inds)):
+        sys.exit('Individuals not matching!')
+    if not (gene0_ctnu.columns.equals(cts) and gene0_ctp.columns.equals(cts)):
+        sys.exit('Cell types not matching!')
 
-    for i, gene in enumerate(genes):
-        # extract gene and transform to ind * ct
-        gene_ctp = ctp[gene].unstack()
-        gene_ctnu = ctnu[gene].unstack()
+    # broadcast P (ind * ct) against ctp/ctnu (index: (ind, ct) * columns: genes)
+    P_flat = P.stack()
+    P_flat.index = P_flat.index.set_names(ctp.index.names)
 
-        if i == 0:
-            # santity check inds and cts matching between ctp, ctnu, and P
-            if not (gene_ctnu.index.equals(inds) and gene_ctp.index.equals(inds)):
-                sys.exit('Individuals not matching!')
-            if not (gene_ctnu.columns.equals(cts) and gene_ctp.columns.equals(cts)):
-                sys.exit('Cell types not matching!')
+    # compute op and nu (all genes at once)
+    op = ctp.mul(P_flat, axis=0).groupby(level='ind').sum()
+    neg = ctnu < 0
+    ctnu_op = ctnu.where(~neg, 0)  # set negative ctnu to 0 for OP data
+    nu_op = ctnu_op.mul(P_flat ** 2, axis=0).groupby(level='ind').sum()
 
-        # standardization
-        gene_op, gene_nu_op, gene_ctnu_op, gene_ctp, gene_nu_ctp, gene_ctnu_ctp = _std(
-            gene_ctp, gene_ctnu, P)
+    # set negative ctnu to max (per gene, per cell type, over individuals) for CTP data
+    max_by_ct = ctnu.groupby(level='ct').transform('max')
+    ctnu_ctp = ctnu.where(~neg, max_by_ct)
+    nu_ctp = ctnu_ctp.mul(P_flat ** 2, axis=0).groupby(level='ind').sum()
 
-        # transform back to series
-        gene_ctp = gene_ctp.stack()
-        gene_ctnu_op = gene_ctnu_op.stack()
-        gene_ctnu_ctp = gene_ctnu_ctp.stack()
+    # standardize op (per gene mean/std/var, computed for all genes at once)
+    mean, sd, var = op.mean(axis=0), op.std(axis=0), op.var(axis=0)
 
-        # add gene name
-        gene_op.name = gene
-        gene_nu_op.name = gene
-        gene_ctnu_op.name = gene
-        gene_ctp.name = gene
-        gene_nu_ctp.name = gene
-        gene_ctnu_ctp.name = gene
-
-        # 
-        op_genes.append(gene_op)
-        nu_op_genes.append(gene_nu_op)
-        ctnu_op_genes.append(gene_ctnu_op)
-        ctp_genes.append(gene_ctp)
-        nu_ctp_genes.append(gene_nu_ctp)
-        ctnu_ctp_genes.append(gene_ctnu_ctp)
-
-    std_op = pd.concat(op_genes, axis=1)
-    nu_op = pd.concat(nu_op_genes, axis=1)
-    ctnu_op = pd.concat(ctnu_op_genes, axis=1)
-    std_ctp = pd.concat(ctp_genes, axis=1)
-    nu_ctp = pd.concat(nu_ctp_genes, axis=1)
-    ctnu_ctp = pd.concat(ctnu_ctp_genes, axis=1)
+    std_op = op.sub(mean, axis=1).div(sd, axis=1)
+    std_ctp = ctp.sub(mean, axis=1).div(sd, axis=1)
+    nu_op = nu_op.div(var, axis=1)
+    nu_ctp = nu_ctp.div(var, axis=1)
+    ctnu_op = ctnu_op.div(var, axis=1)
+    ctnu_ctp = ctnu_ctp.div(var, axis=1)
 
     # santity check order of inds and cts doesn't change after standardization
     # assert np.all(std_op.index.equals(inds) and std_op.columns.equals(cts)
