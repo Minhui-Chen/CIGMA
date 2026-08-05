@@ -313,41 +313,50 @@ def pseudobulk(counts: Optional[pd.DataFrame] = None,
             sep = '_' + sep + '_'
         ind_ct = obs['ind'].astype(str) + sep + obs['ct'].astype(str)
 
-        # indicator matrix
-        # pairs, index = np.unique(ind_ct, return_index=True)
-        # raw_order = pairs[np.argsort(index)]
-        # ind_ct = pd.Categorical(ind_ct, categories=raw_order)
-        indicator = pd.get_dummies(ind_ct, dtype=float)  # don't use dtype int8
-        # indicator = pd.get_dummies(ind_ct, sparse=True, dtype=float)  # don't use dtype int8
-        # calculate cell-to-cell variance 
-        if output_expected_ctnu:
-            cell_var = calculate_expected_cell_to_cell_variance(X, indicator)
-
-        if sim_cell_count is None and sim_cell_prop is None:
-            pass
-        elif sim_cell_count is not None and sim_cell_prop is not None:
+        if sim_cell_count is not None and sim_cell_prop is not None:
             raise ValueError('Both sim_cell_count and sim_cell_prop are provided, only one of them is allowed')
-        else:
-            log.logger.info('Simulating cells')
-            rng = np.random.default_rng(seed)
-            if sim_cell_count is not None:
-                # simulate cells for each (ind, ct) pair
-                indicator = indicator.apply(lambda x: sample_cells(x, rng, 
-                                                            n=sim_cell_count),
-                                            axis=0)
-                assert np.all(indicator.sum(axis=0) == sim_cell_count)
-            elif sim_cell_prop is not None:
-                # simulate cells for each (ind, ct) pair
-                indicator = indicator.apply(lambda x: sample_cells(x, rng, 
-                                                            prop=sim_cell_prop),
-                                            axis=0)
-            
-        cell_num = indicator.to_numpy().sum(axis=0)[:, np.newaxis]
-        ind_ct = indicator.columns
+        simulating = sim_cell_count is not None or sim_cell_prop is not None
 
-        ## convert to sparse matrix
-        indicator = sparse.csr_matrix( indicator.to_numpy() )
-        # indicator = indicator.sparse.to_coo().tocsr()
+        if simulating or output_expected_ctnu:
+            # dense one-hot needed here: sample_cells() operates per (ind,ct) column as a
+            # pandas Series, and calculate_expected_cell_to_cell_variance() expects a
+            # DataFrame -- for the common case below (neither simulating nor computing
+            # expected ctnu), the indicator is built directly as sparse instead, since a
+            # dense (n_cells x n_ind_ct_pairs) one-hot matrix is >99% zeros for typical
+            # cell/individual/cell-type counts.
+            indicator = pd.get_dummies(ind_ct, dtype=float)  # don't use dtype int8
+
+            # calculate cell-to-cell variance
+            if output_expected_ctnu:
+                cell_var = calculate_expected_cell_to_cell_variance(X, indicator)
+
+            if simulating:
+                log.logger.info('Simulating cells')
+                rng = np.random.default_rng(seed)
+                if sim_cell_count is not None:
+                    # simulate cells for each (ind, ct) pair
+                    indicator = indicator.apply(lambda x: sample_cells(x, rng,
+                                                                n=sim_cell_count),
+                                                axis=0)
+                    assert np.all(indicator.sum(axis=0) == sim_cell_count)
+                else:
+                    # simulate cells for each (ind, ct) pair
+                    indicator = indicator.apply(lambda x: sample_cells(x, rng,
+                                                                prop=sim_cell_prop),
+                                                axis=0)
+
+            cell_num = indicator.to_numpy().sum(axis=0)[:, np.newaxis]
+            ind_ct = indicator.columns
+            indicator = sparse.csr_matrix(indicator.to_numpy())
+        else:
+            # build the indicator directly as sparse -- avoids ever materializing an
+            # (n_cells x n_ind_ct_pairs) dense one-hot matrix
+            codes, categories = pd.factorize(ind_ct, sort=True)
+            n_cells, n_pairs = len(codes), len(categories)
+            indicator = sparse.csr_matrix(
+                (np.ones(n_cells), (np.arange(n_cells), codes)), shape=(n_cells, n_pairs))
+            cell_num = np.asarray(indicator.sum(axis=0)).reshape(-1, 1)
+            ind_ct = categories
 
         # inverse indicator matrix
         indicator_inv = indicator.multiply(1 / cell_num.T)
