@@ -5,8 +5,14 @@ from cigma import log, fit
 
 def main():
 
+    # benchmark the original dense-matrix he_ols (instead of the matrix-free default)
+    if snakemake.params.get('dense', False):
+        log.logger.info('Using the dense-matrix he_ols')
+        fit.he_ols = fit.he_ols_dense
+
     outs = []
     data = np.load(snakemake.input.data, allow_pickle=True).item()
+    iid = snakemake.params.get('iid', False)
     iid_jk = snakemake.params.get('iid_jk', False)
     free_jk = snakemake.params.get('free_jk', False)
     full = snakemake.params.get('full', True)
@@ -28,9 +34,10 @@ def main():
         else:
             random = {}
 
-        ## IID
-        iid_he, iid_he_wald = fit.iid_HE(Y, K, ctnu, P, fixed_covars=fixed, 
-                            random_covars=random, jk=iid_jk)
+        ## IID (off by default, so the benchmark only times/measures the Free model)
+        if iid:
+            iid_he, iid_he_wald = fit.iid_HE(Y, K, ctnu, P, fixed_covars=fixed, 
+                                random_covars=random, jk=iid_jk)
 
         ## Free
         start_time = time.time()
@@ -39,11 +46,14 @@ def main():
         end_time = time.time()
         free_he['time'] = end_time - start_time
 
-        out = {'gene': key, 'iid':iid_he, 'free':free_he, 
+        out = {'gene': key, 'free':free_he, 
                 's':data[key]['s'], 
                 'pi': data[key]['pi'], 'nu': data[key]['nu'].mean(), 
                 'var_y': data[key]['y'].var(), 
-                'wald': {'iid': iid_he_wald, 'free':free_he_wald}}
+                'wald': {'free':free_he_wald}}
+        if iid:
+            out['iid'] = iid_he
+            out['wald']['iid'] = iid_he_wald
         # Full
         if full:
             full_he = fit.full_HE(Y, K, ctnu, P, fixed_covars=fixed, random_covars=random)

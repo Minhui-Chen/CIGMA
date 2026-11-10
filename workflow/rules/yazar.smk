@@ -690,6 +690,30 @@ rule yazar_HE_free_benchmark:
     script: '../bin/yazar/he.runtime.py' 
 
 
+# same benchmark with the original dense-matrix he_ols (baseline for the matrix-free one)
+# NOTE: dense he_ols in float64 needs much more memory than the matrix-free one; the
+# request below is a guess -- raise it if jobs get OOM-killed
+use rule yazar_HE_free_benchmark as yazar_HE_free_dense_benchmark with:
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{{i}}.dense.benchmark.npy',
+    params:
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+        dense = True,
+    resources:
+        partition = config['partition2'],
+        mem_mb = '40G',
+
+
+use rule yazar_HE_free_merge as yazar_HE_free_dense_runtime_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{i}.dense.benchmark.npy'
+            for i in range(1000)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.dense.benchmark.npy',
+
+
 use rule yazar_HE_free_merge as yazar_HE_free_runtime_merge with:
     input:
         out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/he.batch{i}.benchmark.npy'
@@ -1734,6 +1758,31 @@ use rule yazar_HE_free_merge as yazar_trans_HE_free_benchmark_merge with:
             for i in range(1000)],
     output:
         out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.benchmark.npy',
+
+
+# same benchmark with the original dense-matrix he_ols (baseline for the matrix-free one)
+# NOTE: dense he_ols in float64 with a trans kinship needs a lot of memory; the request
+# below is a guess -- raise it if jobs get OOM-killed
+use rule yazar_trans_HE_free_benchmark as yazar_trans_HE_free_dense_benchmark with:
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.batch{{i}}.dense.benchmark.npy',
+    params:
+        chrs = chrs,
+        snps = 5, # threshold of snp number per gene
+        iid = False,
+        full = False,
+        dense = True,
+    resources:
+        partition = 'tier2q',
+        mem_mb = '80G',
+
+
+use rule yazar_HE_free_merge as yazar_trans_HE_free_dense_benchmark_merge with:
+    input:
+        out = [f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.batch{i}.dense.benchmark.npy'
+            for i in range(1000)],
+    output:
+        out = f'staging/yazar/{yazar_paramspace.wildcard_pattern}/trans/he.dense.benchmark.npy',
 
 
 

@@ -104,6 +104,24 @@ use rule sim_mergeBatches_HE as sim_mergeBatches_HE_benchmark with:
         out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.he.benchmark.npy',
 
 
+# same benchmark with the original dense-matrix he_ols (baseline for the matrix-free one)
+use rule sim_HE_benchmark as sim_HE_dense_benchmark with:
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/he.batch{{i}}.dense.benchmark.npy',
+    params:
+        free_jk = False,
+        full = False,
+        dense = True,
+
+
+use rule sim_mergeBatches_HE as sim_mergeBatches_HE_dense_benchmark with:
+    input:
+        out = [f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/he.batch{i}.dense.benchmark.npy'
+                for i in range(config['sim']['replicates'])],
+    output:
+        out = f'staging/sim/{{model}}/{sim_paramspace.wildcard_pattern}/L_{{L}}_nL_{{nL}}/out.he.dense.benchmark.npy',
+
+
 def sim_agg_he_truebeta_subspace(wildcards):
     subspace = get_subspace(wildcards.arg, sim_params.loc[sim_params['model']==wildcards.model])
     return expand('analysis/sim/{{model}}/{params}/celltypebeta.txt', params=subspace.instance_patterns)

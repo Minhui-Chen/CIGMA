@@ -4,6 +4,11 @@ from cigma import log, fit, util
 
 
 def main():
+    # benchmark the original dense-matrix he_ols (instead of the matrix-free default)
+    if snakemake.params.get('dense', False):
+        log.logger.info('Using the dense-matrix he_ols')
+        fit.he_ols = fit.he_ols_dense
+
     jk = snakemake.params.get('jk', False)
     target = snakemake.params.get('target')
     geno_pca_n = int(snakemake.wildcards.get('geno_pca_n', '6'))
@@ -26,13 +31,13 @@ def main():
         prop = 1
 
     # read
-    ctps = pd.read_table(snakemake.input.ctp, index_col=(0, 1)).astype('float32')
-    ctnus = pd.read_table(snakemake.input.ctnu, index_col=(0, 1)).astype('float32')
+    ctps = pd.read_table(snakemake.input.ctp, index_col=(0, 1))
+    ctnus = pd.read_table(snakemake.input.ctnu, index_col=(0, 1))
     P = pd.read_table(snakemake.input.P, index_col=0)
     inds = P.index  # order of individuals
     cts = P.columns  # order of cts
     genes = ctps.columns
-    P = P.to_numpy().astype('float32')
+    P = P.to_numpy()
 
     kinship = np.load(snakemake.input.kinship, allow_pickle=True).item()
     
@@ -49,7 +54,7 @@ def main():
             genome = np.array(genome)
             genome = util.transform_grm(genome)
             genome_ids = [line.strip().split()[0] for line in open(genome_f + '.id')]
-            genome = util.sort_grm(genome, genome_ids, inds.to_list()).astype('float32')
+            genome = util.sort_grm(genome, genome_ids, inds.to_list())
             genomes[chr] = genome
             
     promoter_kinship = {}
@@ -86,8 +91,8 @@ def main():
             continue
 
         # extract gene data
-        ctp = ctps[gene].unstack().to_numpy().astype('float32')
-        ctnu = ctnus[gene].unstack().to_numpy().astype('float32')
+        ctp = ctps[gene].unstack().to_numpy()
+        ctnu = ctnus[gene].unstack().to_numpy()
         gene_idx = np.nonzero(kinship['gene'] == gene)[0]
         # sanity check
         if len(gene_idx) == 0:
@@ -109,7 +114,7 @@ def main():
         else:
             K = util.transform_grm(kinship['K'][gene_idx])
             # sort K
-            K = util.sort_grm(K, kinship['ids'], inds.to_list()).astype('float32')
+            K = util.sort_grm(K, kinship['ids'], inds.to_list())
 
 
         out = {}
@@ -129,7 +134,7 @@ def main():
                 free_he, free_he_wald = fit.free_HE(ctp, K, ctnu, P, 
                     fixed_covars, random_covars, Kt=genomes[ichr], 
                     fixed_shared=fixed_shared, random_shared=batch_shared, 
-                    jk=jk, prop=prop, dtype='float32')
+                    jk=jk, prop=prop)
             elif 'promoter' in snakemake.input.keys():
                 # For jointly fitting promoter and enhancer
                 log.logger.info('Jonitly fitting promoter and enhancer')
@@ -137,14 +142,14 @@ def main():
                     continue
                 else:
                     promoter_K = util.transform_grm(promoter_kinship['K'][gene_idx])
-                    promoter_K = util.sort_grm(promoter_K, promoter_kinship['ids'], inds.to_list()).astype('float32')
+                    promoter_K = util.sort_grm(promoter_K, promoter_kinship['ids'], inds.to_list())
                     if np.all(K == promoter_K):
                         log.logger.info(f'Equal GRM')
                         continue
                     free_he, free_he_wald = fit.free_HE(ctp, K, ctnu, P, 
                             fixed_covars, random_covars, Kt=promoter_K, 
                             fixed_shared=fixed_shared, random_shared=batch_shared, 
-                            jk=jk, prop=prop, dtype='float32')
+                            jk=jk, prop=prop)
                     free_he['hom_g2_perSNP'] = free_he['hom_g2'] / kinship['nsnp'][gene_idx]
                     free_he['V_perSNP'] = free_he['V'] / kinship['nsnp'][gene_idx]
                     free_he['hom_g2_perSNP_b'] = free_he['hom_g2_b'] / promoter_kinship['nsnp'][gene_idx]
@@ -167,11 +172,10 @@ def main():
             if 'genome' in snakemake.input.keys():
                 iid_he, iid_he_wald = fit.iid_HE(ctp, K, ctnu, P, fixed_covars, 
                                                  random_covars, Kt=genomes[ichr],
-                                                 jk=jk, dtype='float32')
+                                                 jk=jk)
             else:
                 iid_he, iid_he_wald = fit.iid_HE(ctp, K, ctnu, P, fixed_covars, 
-                                                 random_covars, jk=jk, 
-                                                 dtype='float32')
+                                                 random_covars, jk=jk)
             out['iid'] = iid_he
             if len(iid_he_wald) != 0:
                 if 'p' not in out.keys():
@@ -180,7 +184,7 @@ def main():
 
         # Full
         if snakemake.params.get('full', False):
-            full_he = fit.full_HE(ctp, K, ctnu, P, fixed_covars, random_covars, dtype='float32')
+            full_he = fit.full_HE(ctp, K, ctnu, P, fixed_covars, random_covars)
             out['full'] = full_he
 
         # peak memory (KB on Linux -> convert to MB)
