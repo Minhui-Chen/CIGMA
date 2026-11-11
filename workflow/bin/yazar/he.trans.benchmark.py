@@ -54,7 +54,7 @@ def main():
             genome = np.array(genome)
             genome = util.transform_grm(genome)
             genome_ids = [line.strip().split()[0] for line in open(genome_f + '.id')]
-            genome = util.sort_grm(genome, genome_ids, inds.to_list())
+            genome = util.sort_grm(genome, genome_ids, inds.to_list()).astype('float64')  # read as text, so must be cast to numeric
             genomes[chr] = genome
             
     promoter_kinship = {}
