@@ -139,6 +139,65 @@ Input data
 
 See the `test script <src/cigma/tests/test.py>`_ for complete input data examples and usage.
 
+
+Runtime and memory
+==================
+
+Runtime and memory of CIGMA-HE averaged over 1,000 simulation
+replicates or 1,000 random genes in OneK1K. Runtime is the wall-clock time of ``fit.free_HE``;
+memory is the peak memory of the job.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Analysis
+     - Number of individuals
+     - Number of cell types
+     - Runtime
+     - Memory
+   * - Simulation
+     - 500
+     - 4
+     - 0.016s
+     - 0.16G
+   * - Simulation
+     - 1000
+     - 4
+     - 0.053s
+     - 0.18G
+   * - Simulation
+     - 1500
+     - 4
+     - 0.12s
+     - 0.18G
+   * - Simulation
+     - 2000
+     - 4
+     - 0.2s
+     - 0.21G
+   * - Simulation
+     - 1000
+     - 2
+     - 0.024s
+     - 0.18G
+   * - Simulation
+     - 1000
+     - 8
+     - 0.19s
+     - 0.18G
+   * - OneK1K cis
+     - 928
+     - 7
+     - 0.64s
+     - 0.28G
+   * - OneK1K cis + trans
+     - 928
+     - 7
+     - 1s
+     - 0.47G
+
+
+
 .. _pyscaffold-notes:
 
 Note
